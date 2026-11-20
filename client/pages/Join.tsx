@@ -12,8 +12,10 @@ import {
   type RoomState,
 } from '../../shared/types';
 
-const TOKEN = 'partyrink.token';
-const NAME = 'partyrink.name';
+// `/join?player=2` keeps a separate identity so several tabs on one computer can be different players.
+const SLOT = new URLSearchParams(location.search).get('player')?.replace(/[^\w-]/g, '').slice(0, 8) ?? '';
+const TOKEN = `partyrink.token${SLOT ? '.' + SLOT : ''}`;
+const NAME = `partyrink.name${SLOT ? '.' + SLOT : ''}`;
 const JOIN_ERRORS = new Set(['NAME_INVALID', 'ROOM_FULL', 'JOIN_CLOSED']);
 
 export function Join() {
@@ -29,16 +31,41 @@ export function Join() {
   const [cs, setCs] = useState<ControlState | null>(null);
   const [everConnected, setEverConnected] = useState(false);
 
+  // Forward phone-side problems to the server log (one place to troubleshoot).
   useEffect(() => {
+    const send = (msg: string) => socket.emit('client:log', { msg });
+    const onErr = (e: ErrorEvent) => send(`JS error: ${e.message} @ ${e.filename}:${e.lineno}`);
+    const onRej = (e: PromiseRejectionEvent) => send(`Unhandled rejection: ${String(e.reason)}`);
+    const onDisc = (reason: string) => console.warn('socket disconnected:', reason);
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onRej);
+    socket.on('disconnect', onDisc);
+    return () => {
+      window.removeEventListener('error', onErr);
+      window.removeEventListener('unhandledrejection', onRej);
+      socket.off('disconnect', onDisc);
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    let sentToken = false;
     const onConnect = () => {
       setEverConnected(true);
       const tok = storage.get(TOKEN);
+      sentToken = !!tok;
       if (tok) {
         setJoining(true);
         socket.emit('player:join', { name: storage.get(NAME) ?? '', reconnectToken: tok });
       }
     };
     const onJoined = (m: JoinedMsg) => {
+      if (sentToken && !m.reclaimed) {
+        // our token was unknown: the server was restarted and lost the room
+        setToast('The game server restarted, so everyone is back in the lobby.');
+        window.setTimeout(() => setToast(null), 6000);
+        socket.emit('client:log', { msg: 'token not recognised — server must have restarted; rejoined as new player' });
+      }
+      sentToken = false;
       storage.set(TOKEN, m.reconnectToken);
       storage.set(NAME, m.name);
       setMe(m);
@@ -83,13 +110,30 @@ export function Join() {
 
   const self = me && room ? room.players.find((p) => p.id === me.playerId) : undefined;
 
-  // if we were removed from the roster (pruned/reset) drop back to join form
+  // if we were removed from the roster (pruned/reset) drop back to join form — but only when a
+  // roster that arrived *after* we joined no longer lists us (avoids a race right after joining)
+  const [rosterSeenWithMe, setRosterSeenWithMe] = useState(false);
   useEffect(() => {
-    if (me && room && !self) {
+    if (!me || !room) return;
+    if (self) {
+      if (!rosterSeenWithMe) setRosterSeenWithMe(true);
+    } else if (rosterSeenWithMe) {
+      socket.emit('client:log', { msg: `no longer in roster (phase ${room.phase}) — back to join form` });
+      setRosterSeenWithMe(false);
       setMe(null);
       storage.del(TOKEN);
     }
-  }, [me, room, self]);
+  }, [me, room, self, rosterSeenWithMe, socket]);
+
+  // Log which screen the phone is showing whenever it changes.
+  const screen = !me || !self || !room
+    ? 'join-form'
+    : ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE'].includes(room.phase) && self.inMatch && self.team
+      ? 'controller'
+      : `screen:${room.phase}`;
+  useEffect(() => {
+    if (connected) socket.emit('client:log', { msg: `showing ${screen}` });
+  }, [screen, connected, socket]);
 
   const doJoin = () => {
     setJoinError(null);
@@ -177,7 +221,11 @@ export function Join() {
     return (
       <>
         <Controller socket={socket} cs={cs} team={self.team} name={self.name} number={self.number} connected={connected} />
-        <div className="rotate-msg">Please rotate your phone to portrait (upright) to play.</div>
+        <div className="rotate-msg">
+          <div className="icon">📱</div>
+          Turn your phone sideways to play
+          <small>Left thumb: skate · Right thumb: pass &amp; shoot</small>
+        </div>
       </>
     );
   }
@@ -234,7 +282,11 @@ function PhaseView({
               <button className="btn" disabled={!room.canStartLobby} onClick={() => advance('START')}>
                 Continue ({connectedCount} players)
               </button>
-              {!room.canStartLobby ? <p className="hint-small">Need at least 2 players</p> : null}
+              {!room.canStartLobby ? (
+                <p className="hint-small">
+                  Need at least 2 players. Testing alone? On the laptop's TV page click Admin → Add test player.
+                </p>
+              ) : null}
             </>
           ) : null}
         </>
@@ -311,6 +363,7 @@ function PhaseView({
             <b className={self.team === 'RED' ? 'red-t' : 'blue-t'}>{self.team === 'RED' ? 'RED' : 'BLUE'}</b>. First puck
             drops 3 seconds after start.
           </p>
+          <p>📱 Turn your phone sideways when the match starts — it becomes your controller.</p>
           {isHost ? (
             <>
               <div className="row">

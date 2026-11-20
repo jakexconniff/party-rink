@@ -650,31 +650,38 @@ body.phone {
 .ctl-top .score {
   font-variant-numeric: tabular-nums;
 }
+/* Landscape controller: hold the phone sideways like a gamepad.
+   Left half = joystick, right half = two round buttons (SHOOT bottom-right, PASS/POKE up-left of it). */
+.ctl-top {
+  padding: max(4px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 2px
+    max(14px, env(safe-area-inset-left));
+  font-size: 14px;
+}
 .ctl-body {
   flex: 1;
   display: flex;
   min-height: 0;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 .stick-zone {
-  width: 55%;
+  width: 50%;
   position: relative;
   touch-action: none;
   border-right: 1px dashed rgba(255, 255, 255, 0.08);
 }
 .stick-hint {
   position: absolute;
-  inset: auto 0 18px 0;
+  inset: auto 0 10px 0;
   text-align: center;
   color: rgba(255, 255, 255, 0.35);
-  font-size: 14px;
+  font-size: 13px;
   pointer-events: none;
 }
 .stick-base {
   position: absolute;
-  width: 150px;
-  height: 150px;
-  margin: -75px 0 0 -75px;
+  width: 140px;
+  height: 140px;
+  margin: -70px 0 0 -70px;
   border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.06);
@@ -682,59 +689,67 @@ body.phone {
 }
 .stick-knob {
   position: absolute;
-  width: 74px;
-  height: 74px;
-  margin: -37px 0 0 -37px;
+  width: 70px;
+  height: 70px;
+  margin: -35px 0 0 -35px;
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #fff, #c7d4e4);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
 .btn-zone {
-  width: 45%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 12px 14px 16px 12px;
+  width: 50%;
+  position: relative;
+  --shoot: min(62vh, 22vw);
+  --pass: min(46vh, 16vw);
 }
 .act {
-  flex: 1;
-  border-radius: 24px;
-  font-size: 26px;
+  position: absolute;
+  border-radius: 50%;
+  font-size: clamp(18px, 6vh, 28px);
   font-weight: 900;
   letter-spacing: 0.03em;
   touch-action: none;
-  position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   line-height: 1.1;
-  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 255, 255, 0.12);
   transition: transform 0.04s;
 }
 .act small {
-  font-size: 14px;
+  font-size: clamp(10px, 3.2vh, 13px);
   font-weight: 700;
-  opacity: 0.8;
+  opacity: 0.85;
+  max-width: 80%;
 }
 .act.down {
-  transform: translateY(4px) scale(0.98);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  transform: translateY(4px) scale(0.97);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 255, 255, 0.3);
   filter: brightness(1.25);
 }
-.act.pass {
-  background: linear-gradient(180deg, #36c98f, #12865a);
+.act.pass,
+.act.poke {
+  width: var(--pass);
+  height: var(--pass);
+  right: calc(var(--shoot) + 6%);
+  top: 6%;
   color: #fff;
+}
+.act.pass {
+  background: radial-gradient(circle at 40% 30%, #4fe0a5, #12865a);
 }
 .act.poke {
-  background: linear-gradient(180deg, #8f9bb3, #556179);
-  color: #fff;
+  background: radial-gradient(circle at 40% 30%, #a9b4c9, #556179);
 }
 .act.shoot {
-  flex: 1.35;
-  background: linear-gradient(180deg, #ffd23f, #e09b00);
+  width: var(--shoot);
+  height: var(--shoot);
+  right: 5%;
+  bottom: 7%;
+  background: radial-gradient(circle at 40% 30%, #ffe27a, #e09b00);
   color: #3a2700;
 }
 .act.shoot.inactive {
@@ -753,11 +768,11 @@ body.phone {
 }
 .ctl-banner {
   position: absolute;
-  top: 40%;
+  top: 38%;
   left: 0;
   right: 0;
   text-align: center;
-  font-size: 44px;
+  font-size: 40px;
   font-weight: 900;
   pointer-events: none;
   text-shadow: 0 3px 0 rgba(0, 0, 0, 0.5);
@@ -772,20 +787,57 @@ body.phone {
   vertical-align: middle;
   margin-right: 4px;
 }
+/* Shown over the controller while the phone is held upright. */
 .rotate-msg {
   position: fixed;
   inset: 0;
   z-index: 50;
   background: var(--bg);
   display: none;
-  place-items: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
   text-align: center;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 800;
   padding: 24px;
 }
-@media (orientation: landscape) and (max-height: 500px) {
+.rotate-msg .icon {
+  font-size: 72px;
+  animation: tilt 1.6s ease-in-out infinite;
+}
+.rotate-msg small {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+@keyframes tilt {
+  0%,
+  30% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+@media (orientation: portrait) {
   .rotate-msg {
-    display: grid;
+    display: flex;
+  }
+}
+/* Lobby screens in landscape: keep them usable (short viewport) */
+@media (orientation: landscape) and (max-height: 500px) {
+  .ph {
+    gap: 8px;
+  }
+  .ph h1 {
+    font-size: 24px;
+    margin-top: 0;
+  }
+  .btn {
+    padding: 11px;
+    font-size: 18px;
   }
 }

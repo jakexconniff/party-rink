@@ -5,12 +5,13 @@
   "type": "module",
   "description": "Local-network phone-controlled arcade hockey party game",
   "scripts": {
-    "dev": "tsx watch --clear-screen=false --ignore ./client/** --ignore ./dist/** server/index.ts --dev",
+    "dev": "tsx watch --clear-screen=false --exclude \"./client/**\" --exclude \"./dist/**\" server/index.ts --dev",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
     "party": "npm run build && npm start",
     "test": "vitest run",
     "smoke:8": "tsx scripts/smoke-eight.ts",
+    "fake-phones": "tsx scripts/fake-phones.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

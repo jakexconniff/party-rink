@@ -496,12 +496,15 @@ export function RinkCanvas({ buffer, roster }: Props) {
           shadow(pxw, pyw + 2, PUCK_R + 2, 0.35);
           const [px, py] = P(pxw, pyw);
           const z = S(pyw);
-          const r = PUCK_R * z * 1.15;
-          // glow halo so the puck is visible from across the room
-          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          const r = PUCK_R * z * 1.4;
+          // bright halo ring so the puck is visible from across the room
+          ctx.fillStyle = 'rgba(255,230,80,0.35)';
+          ctx.strokeStyle = 'rgba(255,190,0,0.9)';
+          ctx.lineWidth = 2.5 * z;
           ctx.beginPath();
-          ctx.ellipse(px, py - 2 * z, r + 5 * z, (r + 5 * z) * SQUASH, 0, 0, Math.PI * 2);
+          ctx.ellipse(px, py - 3 * z, r + 9 * z, (r + 9 * z) * SQUASH, 0, 0, Math.PI * 2);
           ctx.fill();
+          ctx.stroke();
           ctx.fillStyle = '#0d0f12';
           ctx.beginPath();
           ctx.ellipse(px, py, r, r * SQUASH, 0, 0, Math.PI * 2);

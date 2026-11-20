@@ -202,6 +202,49 @@ describe('phase flow and permissions', () => {
   });
 });
 
+describe('local test players', () => {
+  it('never become host, auto-balance and ready, and play a match', () => {
+    const { room } = makeRoom();
+    room.addTestPlayer(); // added before any human
+    expect(room.hostId).toBeNull();
+    const me = room.join('Me');
+    if (!me.ok) throw new Error('join failed');
+    expect(room.hostId).toBe(me.player.id);
+    room.addTestPlayer();
+    room.addTestPlayer();
+    const host = { kind: 'player' as const, id: me.player.id };
+    room.advance(host, 'START');
+    room.advance(host, 'CHOOSE_HOCKEY');
+    room.setTeam(me.player.id, 'BLUE');
+    room.setReady(me.player.id, true);
+    room.housekeeping();
+    expect(room.teamCheck().ok).toBe(true); // 2v2
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    for (let i = 0; i < 60 * 20; i++) room.tick();
+    const bots = room.match!.skaters.filter((s) => s.id !== me.player.id);
+    expect(bots.length).toBe(3);
+    expect(bots.some((s) => Math.hypot(s.vx, s.vy) > 10 || s.x !== 430)).toBe(true);
+    room.match!.devSetClock(10);
+    for (let i = 0; i < 5; i++) room.tick();
+    expect(room.phase).toBe('RESULTS');
+    room.removeTestPlayers();
+    expect(room.players.length).toBe(1);
+    expect(room.hostId).toBe(me.player.id);
+  });
+
+  it('host passes only to humans', () => {
+    const { room, advanceTime } = makeRoom();
+    const a = room.join('A');
+    room.addTestPlayer();
+    if (!a.ok) throw new Error();
+    room.disconnect(a.player.id);
+    advanceTime(10000);
+    room.housekeeping();
+    expect(room.players.find((p) => p.id === room.hostId)?.testPlayer ?? false).toBe(false);
+  });
+});
+
 describe('input handling', () => {
   it('ignores stale seq, clamps values, neutralizes on disconnect', () => {
     const { room } = makeRoom();

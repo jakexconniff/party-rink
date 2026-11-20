@@ -116,6 +116,7 @@ function PlayerLine({ p }: { p: PublicPlayer }) {
       <Badge p={p} />
       <span>{p.name}</span>
       {p.isHost ? <span className="pill host">HOST</span> : null}
+      {p.test ? <span className="pill off">TEST</span> : null}
       {!p.connected ? <span className="pill off">AWAY</span> : null}
     </>
   );
@@ -182,6 +183,11 @@ function Lobby({
               ? `Waiting for players (${room.players.length}/8) — need at least 2`
               : `Waiting for players (${room.players.length}/8) · ${host?.name ?? 'Host'} can press Continue`}
         </div>
+        {info?.isLocal && connected < 2 ? (
+          <div className="tv-sub" style={{ fontSize: '0.9em', marginTop: '0.6em' }}>
+            Testing by yourself? Click <b>Admin</b> (bottom-left) → <b>Add test player</b>.
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -262,13 +268,14 @@ function MatchView({
   const countdown = s && s.phase === 'COUNTDOWN' ? Math.max(1, Math.ceil(s.countdownMs / 1000)) : null;
   const [go, setGo] = useState(false);
   const prevPhase = useRef<string | null>(null);
+  const goTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(goTimer.current), []);
   useEffect(() => {
     if (!s) return;
     if (prevPhase.current === 'COUNTDOWN' && s.phase === 'PLAYING') {
       setGo(true);
-      const t = window.setTimeout(() => setGo(false), 800);
-      prevPhase.current = s.phase;
-      return () => window.clearTimeout(t);
+      window.clearTimeout(goTimer.current);
+      goTimer.current = window.setTimeout(() => setGo(false), 800);
     }
     prevPhase.current = s.phase;
   }, [s]);
@@ -355,8 +362,19 @@ function AdminPanel({ room, socket }: { room: RoomState; socket: ReturnType<type
     ],
   };
   const inMatch = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE'].includes(room.phase);
+  const canAddTest = ['LOBBY', 'GAME_SELECT', 'TEAMS'].includes(room.phase) && room.players.length < 8;
+  const testCount = room.players.filter((p) => p.test).length;
   return (
     <div className="admin-panel">
+      <div className="lbl">Testing alone? Add test players</div>
+      <button disabled={!canAddTest} onClick={() => socket.emit('admin:addTestPlayer')}>
+        + Add test player ({testCount})
+      </button>
+      {testCount ? (
+        <button disabled={inMatch} onClick={() => socket.emit('admin:removeTestPlayers')}>
+          Remove test players
+        </button>
+      ) : null}
       <div className="lbl">Host override ({room.phase})</div>
       {(actions[room.phase] ?? []).map(([a, label]) => (
         <button key={a} onClick={() => adv(a)}>

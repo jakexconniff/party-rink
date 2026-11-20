@@ -30,6 +30,7 @@ export interface Player {
   disconnectedAt: number | null;
   tokenHash: string;
   inMatch: boolean;
+  testPlayer: boolean;
   lastSeq: number;
   lastInputAt: number;
 }
@@ -157,6 +158,7 @@ export class Room {
             connected: p.connected,
             isHost: p.id === this.hostId,
             inMatch: p.inMatch,
+            test: p.testPlayer,
           }),
         ),
       durationSeconds: this.durationSeconds,
@@ -184,7 +186,7 @@ export class Room {
           this.match.setConnected(p.id, true);
           this.match.neutralize(p.id);
         }
-        if (!this.hostId) this.hostId = p.id;
+        if (!this.hostId && !p.testPlayer) this.hostId = p.id;
         this.dirty = true;
         return { ok: true, player: p, token, reclaimed: true };
       }
@@ -211,12 +213,13 @@ export class Room {
       disconnectedAt: null,
       tokenHash: hashToken(newToken),
       inMatch: false,
+      testPlayer: false,
       lastSeq: -1,
       lastInputAt: 0,
     };
     this.players.push(player);
     this.tokenIndex.set(player.tokenHash, player.id);
-    if (!this.hostId) this.hostId = player.id;
+    if (!this.hostId && !player.testPlayer) this.hostId = player.id;
     this.dirty = true;
     return { ok: true, player, token: newToken, reclaimed: false };
   }
@@ -242,6 +245,7 @@ export class Room {
   /** Called regularly (e.g. every tick). Handles host succession and pruning. */
   housekeeping() {
     const now = this.now();
+    this.balanceTestPlayers();
     if (PRE_MATCH.includes(this.stage)) {
       for (const p of [...this.players]) {
         if (!p.connected && p.disconnectedAt !== null && now - p.disconnectedAt > this.pruneMs) {
@@ -253,7 +257,7 @@ export class Room {
     const hostGone =
       !host || (!host.connected && host.disconnectedAt !== null && now - host.disconnectedAt > this.hostGraceMs);
     if (hostGone) {
-      const next = this.connectedPlayers().sort((a, b) => a.joinedAt - b.joinedAt)[0];
+      const next = this.connectedPlayers().filter((p) => !p.testPlayer).sort((a, b) => a.joinedAt - b.joinedAt)[0];
       const nextId = next ? next.id : host ? host.id : null;
       if (nextId !== this.hostId) {
         this.hostId = nextId;
@@ -351,6 +355,82 @@ export class Room {
     this.dirty = true;
   }
 
+  // ---------------------------------------------------------------- local test players
+  // Added from the laptop admin panel so one person can test the full flow. They never become host,
+  // auto-join the smaller team and auto-ready, and skate with very simple scripted input.
+
+  addTestPlayer() {
+    if (!JOINABLE.includes(this.stage)) throw new RoomError('BAD_PHASE', 'Add test players in the lobby or team screen');
+    const n = this.players.filter((p) => p.testPlayer).length;
+    const res = this.join(`Test Bot ${String.fromCharCode(65 + n)}`);
+    if (!res.ok) throw new RoomError(res.code, res.message);
+    res.player.testPlayer = true;
+    this.tokenIndex.delete(res.player.tokenHash);
+    if (this.hostId === res.player.id) this.hostId = null;
+    this.dirty = true;
+  }
+
+  removeTestPlayers() {
+    if (this.stage === 'MATCH') throw new RoomError('BAD_PHASE', 'Remove test players after the match');
+    for (const p of this.players.filter((x) => x.testPlayer)) this.removePlayer(p.id);
+  }
+
+  private balanceTestPlayers() {
+    if (this.stage !== 'TEAMS') return;
+    const tests = this.players.filter((p) => p.testPlayer).sort((a, b) => a.number - b.number);
+    if (!tests.length) return;
+    const humans = this.connectedPlayers().filter((p) => !p.testPlayer);
+    let red = humans.filter((p) => p.team === 'RED').length;
+    let blue = humans.filter((p) => p.team === 'BLUE').length;
+    for (const t of tests) {
+      const team: Team = red <= blue ? 'RED' : 'BLUE';
+      if (team === 'RED') red++;
+      else blue++;
+      if (t.team !== team || !t.ready) {
+        t.team = team;
+        t.ready = true;
+        this.dirty = true;
+      }
+    }
+  }
+
+  private botTick = 0;
+  private driveTestPlayers(m: HockeyMatch) {
+    if (m.phase !== 'PLAYING') return;
+    this.botTick++;
+    const p = m.puck;
+    for (const pl of this.players) {
+      if (!pl.testPlayer || !pl.inMatch) continue;
+      const s = m.getSkater(pl.id);
+      if (!s) continue;
+      const goalX = s.team === 'RED' ? CFG.rink.maxX : CFG.rink.minX;
+      const carrier = p.carrierId ? m.getSkater(p.carrierId) : undefined;
+      let tx = p.x;
+      let ty = p.y;
+      let shoot = false;
+      let pass = false;
+      if (carrier?.id === s.id) {
+        tx = goalX;
+        ty = CFG.rink.cy + Math.sin(this.botTick / 40 + s.number) * 50;
+        const dist = Math.abs(goalX - s.x);
+        // hold shoot for a short charge, then release
+        const phaseT = (this.botTick + s.number * 7) % 40;
+        shoot = dist < 420 && phaseT < 20;
+      } else if (carrier && carrier.team === s.team) {
+        // spread out ahead of the teammate
+        tx = carrier.x + (s.team === 'RED' ? 160 : -160);
+        ty = carrier.y > CFG.rink.cy ? 200 : 480;
+      } else if (carrier) {
+        pass = Math.hypot(carrier.x - s.x, carrier.y - s.y) < 70 && (this.botTick + s.number) % 30 === 0;
+      }
+      const dx = tx - s.x;
+      const dy = ty - s.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const speed = d < 30 ? d / 30 : 0.75; // test bots skate a little slower than full speed
+      m.setInput(s.id, { x: (dx / d) * speed, y: (dy / d) * speed, shoot, pass });
+    }
+  }
+
   private clearReady() {
     for (const p of this.players) p.ready = false;
   }
@@ -439,6 +519,7 @@ export class Room {
           if (s && (s.input.x || s.input.y || s.input.pass || s.input.shoot)) m.neutralize(p.id);
         }
       }
+      this.driveTestPlayers(m);
       m.step();
       if (m.phase === 'OVER') {
         this.result = {

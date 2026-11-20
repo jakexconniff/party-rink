@@ -1,0 +1,55 @@
+# Testing Party Rink by yourself (happy path)
+
+You need one laptop and one phone (or just the laptop, see "No phone?" below).
+
+## 1. Start the server
+
+In a terminal in this folder, run:
+
+```
+node node_modules/tsx/dist/cli.mjs server/index.ts --dev
+```
+
+(`npm run dev` does the same once npm is fixed on this machine. The `npm run dev` script auto-restarts when server files change. That wipes the game, so don't edit code mid-test.)
+
+The terminal prints the TV address and the phone join address. Leave the terminal open. Every join, button press, phase change, goal and phone-side error is logged there with a timestamp.
+
+## 2. Open the TV view on the laptop
+
+Go to `http://localhost:3000/tv`. You should see a QR code and 8 empty slots.
+
+## 3. Join from your phone
+
+The phone must be on the same Wi-Fi as the laptop. Scan the QR code, type a name and tap **Join**. You become **Player 1** with a **HOST** badge.
+
+## 4. Add test players (since you're alone)
+
+On the laptop's TV page, click **Admin** (bottom-left), then **+ Add test player** three times. Test players show a **TEST** tag. They never become host, pick teams and press Ready by themselves, and skate a simple chase-the-puck pattern during the match.
+
+## 5. Walk the flow on your phone
+
+1. **Continue**, then **Play Ice Hockey**.
+2. Pick a team and tap **I'm ready**. Test players rebalance around you.
+3. Tap **Next: match length**, pick 5 / 10 / 15 minutes, then tap **Start Match!**
+4. **Turn the phone sideways.** The left half is the joystick (drag anywhere). The right side has **PASS/POKE** (top) and **SHOOT** (bottom; tap, or hold to charge and aim with the stick).
+5. Watch the TV for the 3-2-1 countdown, your skater moving, goals with a 2-second pause, and the clock.
+
+## 6. Finish quickly
+
+On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match now** jumps to results. On your phone, **Rematch** returns to teams and **New game** returns to game select.
+
+## Other useful checks
+
+- **Reconnect:** reload the phone page mid-match. You get the same skater back.
+- **Server restarted:** phones say so and drop back to the lobby. The game lives in memory, so a restart always resets it.
+- **No phone?** Open `http://localhost:3000/join?player=1` in a narrow browser window. `?player=2` gives a second independent player in another tab. Use your browser's device toolbar to emulate a phone in landscape.
+- **Automated:** `node node_modules/vitest/vitest.mjs run` (unit tests) and `node node_modules/tsx/dist/cli.mjs scripts/smoke-eight.ts` (8 real socket clients through the whole flow).
+
+## Troubleshooting with the log
+
+| You see | Look in the terminal for |
+|---|---|
+| Phone bounced back to "You're in" | `PARTY RINK is running` appearing again (server restarted), or `[client …] no longer in roster` |
+| A button did nothing | `[rejected] #N name: CODE — reason` |
+| Phone shows the wrong screen | `[client #N name] showing …` next to `[phase] A → B` |
+| Phone keeps disconnecting | `[disconnect] #N name (reason)` |

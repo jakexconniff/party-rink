@@ -8,6 +8,23 @@ const SEND_MIN_MS = 33; // ≤30 Hz on change
 const HEARTBEAT_MS = 120;
 const CHARGE_MS = 1500;
 
+/** Android Chrome can lock to landscape once in fullscreen; iOS can't — the rotate prompt covers it. */
+let lockTried = false;
+function tryLandscapeLock() {
+  if (lockTried) return;
+  lockTried = true;
+  try {
+    const el = document.documentElement as HTMLElement & { requestFullscreen?: () => Promise<void> };
+    const orient = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    if (!el.requestFullscreen || !orient?.lock || !matchMedia('(orientation: landscape)').matches) return;
+    el.requestFullscreen()
+      .then(() => orient.lock!('landscape'))
+      .catch(() => undefined);
+  } catch {
+    /* optional nicety only */
+  }
+}
+
 interface Props {
   socket: Socket;
   cs: ControlState | null;
@@ -85,6 +102,7 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
     };
     window.addEventListener('blur', onHide);
     window.addEventListener('pagehide', onHide);
+    window.addEventListener('orientationchange', onHide);
     document.addEventListener('visibilitychange', onVis);
     const prevent = (e: Event) => e.preventDefault();
     document.addEventListener('contextmenu', prevent);
@@ -92,6 +110,7 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
     return () => {
       window.removeEventListener('blur', onHide);
       window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('orientationchange', onHide);
       document.removeEventListener('visibilitychange', onVis);
       document.removeEventListener('contextmenu', prevent);
       document.removeEventListener('gesturestart', prevent as EventListener);
@@ -122,6 +141,7 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
   };
   const onStickDown = (e: React.PointerEvent) => {
     e.preventDefault();
+    tryLandscapeLock();
     if (stickId.current !== null) return;
     stickId.current = e.pointerId;
     try {
@@ -229,7 +249,7 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
         >
           <div ref={baseEl} className="stick-base" style={{ display: 'none' }} />
           <div ref={knobEl} className="stick-knob" style={{ display: 'none' }} />
-          <div className="stick-hint">Drag anywhere here to skate</div>
+          <div className="stick-hint">Left thumb: drag anywhere here to skate</div>
         </div>
         <div className="btn-zone">
           <button

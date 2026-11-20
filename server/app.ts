@@ -65,7 +65,7 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
   const io = new Server(http, { serveClient: false, pingInterval: 5000, pingTimeout: 8000 });
   const room = new Room({ devHooks: opts.devHooks, hostGraceMs: opts.hostGraceMs, pruneMs: opts.pruneMs });
   const log = (...a: unknown[]) => {
-    if (!opts.quiet) console.log(...a);
+    if (!opts.quiet) console.log(new Date().toLocaleTimeString('en-US', { hour12: false }), ...a);
   };
 
   let actualPort = opts.port;
@@ -142,8 +142,11 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
     }
     log(`[admin] reset to lobby (${keep ? 'kept players' : 'cleared players'})`);
   }
-  const err = (socket: Socket, code: string, message: string) =>
+  const err = (socket: Socket, code: string, message: string) => {
+    const p = socket.data.playerId ? room.getPlayer(socket.data.playerId) : undefined;
+    log(`[rejected] ${p ? `#${p.number} ${p.name}` : socket.id.slice(0, 5)}: ${code} — ${message}`);
     socket.emit('system:error', { code, message } satisfies ErrorMsg);
+  };
 
   io.on('connection', (socket) => {
     const role = socket.handshake.auth?.role === 'tv' ? 'tv' : 'phone';
@@ -179,6 +182,30 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
     const adminGuard = () => {
       if (!local || role !== 'tv') throw new RoomError('NOT_ADMIN', 'Admin controls only work on the laptop TV screen');
     };
+    const who = () => {
+      const p = playerId ? room.getPlayer(playerId) : undefined;
+      return p ? `#${p.number} ${p.name}` : role === 'tv' ? `TV${local ? '(laptop)' : ''}` : `phone ${socket.id.slice(0, 5)}`;
+    };
+    log(`[connect] ${role} ${socket.id.slice(0, 5)} from ${socket.handshake.address}`);
+
+    // Diagnostic log of every non-input event (tokens redacted).
+    socket.onAny((ev: string, payload: unknown) => {
+      if (ev === 'input:state' || ev === 'client:log') return;
+      let shown = '';
+      try {
+        shown = JSON.stringify(payload, (k, v) => (k === 'reconnectToken' ? (v ? '<token>' : v) : v)) ?? '';
+      } catch {
+        shown = '?';
+      }
+      log(`[event] ${who()} → ${ev} ${shown.slice(0, 120)}  (phase ${room.phase})`);
+    });
+    // Phones/TV forward their own errors and state changes here so everything is in one log.
+    socket.on(
+      'client:log',
+      guard((payload: { msg?: unknown } = {}) => {
+        if (typeof payload?.msg === 'string') log(`[client ${who()}] ${payload.msg.slice(0, 300)}`);
+      }),
+    );
 
     socket.on(
       'player:join',
@@ -206,6 +233,8 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
           name: res.player.name,
           reclaimed: res.reclaimed,
         };
+        // send the roster that already contains this player first, so the phone never sees itself "missing"
+        socket.emit('room:state', room.publicState());
         socket.emit('player:joined', msg);
         log(`[join] #${res.player.number} ${res.player.name}${res.reclaimed ? ' (reconnected)' : ''}`);
       }),
@@ -254,6 +283,20 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
       }),
     );
     socket.on(
+      'admin:addTestPlayer',
+      guard(() => {
+        adminGuard();
+        room.addTestPlayer();
+      }),
+    );
+    socket.on(
+      'admin:removeTestPlayers',
+      guard(() => {
+        adminGuard();
+        room.removeTestPlayers();
+      }),
+    );
+    socket.on(
       'admin:endMatch',
       guard(() => {
         adminGuard();
@@ -276,13 +319,13 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
       );
     }
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      const label = who();
       if (playerId && socketsByPlayer.get(playerId) === socket) {
         socketsByPlayer.delete(playerId);
         room.disconnect(playerId);
-        const p = room.getPlayer(playerId);
-        if (p) log(`[left] #${p.number} ${p.name}`);
       }
+      log(`[disconnect] ${label} (${reason})`);
     });
   });
 
@@ -292,6 +335,8 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
   let snapAcc = 0;
   let ctrlAcc = 0;
   const stepMs = CFG.dtMs;
+  let lastLoggedPhase: string = room.phase;
+  let lastLoggedHost: string | null = null;
   const loop = setInterval(() => {
     const now = performance.now();
     acc += Math.min(now - last, 250);
@@ -311,7 +356,17 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
     if (steps === 6) acc = 0;
     if (room.dirty) {
       room.dirty = false;
-      io.emit('room:state', room.publicState());
+      const st = room.publicState();
+      if (st.phase !== lastLoggedPhase) {
+        log(`[phase] ${lastLoggedPhase} → ${st.phase}  (players: ${st.players.map((p) => `#${p.number}${p.connected ? '' : '(away)'}${p.team ? '/' + p.team[0] : ''}`).join(' ') || 'none'})`);
+        lastLoggedPhase = st.phase;
+      }
+      if (st.hostId !== lastLoggedHost) {
+        const h = st.players.find((p) => p.id === st.hostId);
+        log(`[host] ${h ? `#${h.number} ${h.name}` : 'none'}`);
+        lastLoggedHost = st.hostId;
+      }
+      io.emit('room:state', st);
     }
     const m = room.match;
     if (m && snapAcc >= 33) {

@@ -38,6 +38,8 @@ export interface PublicPlayer {
   connected: boolean;
   isHost: boolean;
   inMatch: boolean;
+  /** laptop-added test player (local testing only) */
+  test: boolean;
 }
 
 export interface MatchResult {
