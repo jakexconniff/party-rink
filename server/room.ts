@@ -2,6 +2,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { HockeyMatch } from './simulation/match';
 import { CFG } from './simulation/config';
+import { LOSING_QUIPS, QUIP_RULES } from '../shared/quips';
 import {
   DURATIONS,
   MAX_NAME_LENGTH,
@@ -32,6 +33,8 @@ export interface Player {
   tokenHash: string;
   inMatch: boolean;
   testPlayer: boolean;
+  /** a deliberately bad test bot */
+  dumbBot: boolean;
   lastSeq: number;
   lastInputAt: number;
 }
@@ -44,6 +47,10 @@ export interface RoomOptions {
   pruneMs?: number;
   devHooks?: boolean;
   seed?: number;
+  /** random source for easter eggs (tests inject a fixed one) */
+  random?: () => number;
+  quipChance?: number;
+  quipCooldownMs?: number;
 }
 
 export type JoinResult =
@@ -105,7 +112,13 @@ export class Room {
     this.pruneMs = opts.pruneMs ?? 20000;
     this.devHooks = !!opts.devHooks;
     this.seed = opts.seed ?? (Date.now() & 0xffff);
+    this.random = opts.random ?? Math.random;
+    this.quipChance = opts.quipChance ?? QUIP_RULES.chance;
+    this.quipCooldownMs = opts.quipCooldownMs ?? QUIP_RULES.cooldownMs;
   }
+  private random: () => number;
+  private quipChance: number;
+  private quipCooldownMs: number;
 
   // ---------------------------------------------------------------- queries
 
@@ -160,6 +173,7 @@ export class Room {
             isHost: p.id === this.hostId,
             inMatch: p.inMatch,
             test: p.testPlayer,
+            dumb: p.dumbBot,
           }),
         ),
       durationSeconds: this.durationSeconds,
@@ -215,6 +229,7 @@ export class Room {
       tokenHash: hashToken(newToken),
       inMatch: false,
       testPlayer: false,
+      dumbBot: false,
       lastSeq: -1,
       lastInputAt: 0,
     };
@@ -360,12 +375,13 @@ export class Room {
   // Added from the laptop admin panel so one person can test the full flow. They never become host,
   // auto-join the smaller team and auto-ready, and skate with very simple scripted input.
 
-  addTestPlayer() {
+  addTestPlayer(kind: 'smart' | 'dumb' = 'smart') {
     if (!JOINABLE.includes(this.stage)) throw new RoomError('BAD_PHASE', 'Add test players in the lobby or team screen');
-    const n = this.players.filter((p) => p.testPlayer).length;
-    const res = this.join(`Test Bot ${String.fromCharCode(65 + n)}`);
+    const n = this.players.filter((p) => p.testPlayer && p.dumbBot === (kind === 'dumb')).length;
+    const res = this.join(`${kind === 'dumb' ? 'Dumb' : 'Test'} Bot ${String.fromCharCode(65 + n)}`);
     if (!res.ok) throw new RoomError(res.code, res.message);
     res.player.testPlayer = true;
+    res.player.dumbBot = kind === 'dumb';
     this.tokenIndex.delete(res.player.tokenHash);
     if (this.hostId === res.player.id) this.hostId = null;
     this.dirty = true;
@@ -404,6 +420,10 @@ export class Room {
       if (!pl.testPlayer || !pl.inMatch) continue;
       const s = m.getSkater(pl.id);
       if (!s) continue;
+      if (pl.dumbBot) {
+        this.driveDumbBot(m, s);
+        continue;
+      }
       const goalX = s.team === 'RED' ? m.R.maxX : m.R.minX;
       const carrier = p.carrierId ? m.getSkater(p.carrierId) : undefined;
       let tx = p.x;
@@ -432,6 +452,58 @@ export class Room {
     }
   }
 
+  /** Dumb bots drift slowly between random spots, only chase the puck when it's right next to them,
+   *  shoot in random directions, and sometimes poke at nothing. Easy to beat. */
+  private dumbState = new Map<string, { tx: number; ty: number; untilTick: number }>();
+  private driveDumbBot(m: HockeyMatch, s: ReturnType<HockeyMatch['getSkater']> & object) {
+    const R = m.R;
+    let st = this.dumbState.get(s.id);
+    if (!st || this.botTick >= st.untilTick) {
+      st = {
+        tx: R.minX + 40 + Math.random() * (R.maxX - R.minX - 80),
+        ty: R.minY + 40 + Math.random() * (R.maxY - R.minY - 80),
+        untilTick: this.botTick + 90 + Math.floor(Math.random() * 120),
+      };
+      this.dumbState.set(s.id, st);
+    }
+    const p = m.puck;
+    let tx = st.tx;
+    let ty = st.ty;
+    const near = Math.hypot(p.x - s.x, p.y - s.y);
+    if (!p.carrierId && near < 110) {
+      tx = p.x;
+      ty = p.y;
+    }
+    const carrying = p.carrierId === s.id;
+    // shoot roughly every 2.5s while carrying, in whatever direction it's skating
+    const shoot = carrying && this.botTick % 150 < 6;
+    // occasionally poke at nothing in particular
+    const pass = !carrying && Math.random() < 0.004;
+    const dx = tx - s.x;
+    const dy = ty - s.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const speed = Math.min(0.4, d / 60);
+    m.setInput(s.id, { x: (dx / d) * speed, y: (dy / d) * speed, shoot, pass });
+  }
+
+  // ---------------------------------------------------------------- easter egg: losing-team quips
+
+  private lastQuipAt = -Infinity;
+  /** Called by the match after every goal. Rare on purpose — see shared/quips.ts. */
+  private maybeQuip(m: HockeyMatch, team: Team, before: Record<Team, number>) {
+    const loser: Team = team === 'RED' ? 'BLUE' : 'RED';
+    if (before[team] - before[loser] < QUIP_RULES.minDeficit) return;
+    const now = this.now();
+    if (now - this.lastQuipAt < this.quipCooldownMs) return;
+    if (this.random() >= this.quipChance) return;
+    const losers = m.skaters.filter((s) => s.team === loser && s.connected);
+    if (!losers.length || !LOSING_QUIPS.length) return;
+    const who = losers[Math.floor(this.random() * losers.length)];
+    const text = LOSING_QUIPS[Math.floor(this.random() * LOSING_QUIPS.length)];
+    this.lastQuipAt = now;
+    m.events.push({ type: 'quip', by: who.number, text });
+  }
+
   private clearReady() {
     for (const p of this.players) p.ready = false;
   }
@@ -450,6 +522,8 @@ export class Room {
       this.durationSeconds * 1000,
       this.seed + this.matchCount * 7919,
     );
+    const m = this.match;
+    m.onGoal = (team, before) => this.maybeQuip(m, team, before);
     this.result = null;
     this.stage = 'MATCH';
   }

@@ -226,7 +226,7 @@ describe('local test players', () => {
     expect(bots.length).toBe(3);
     expect(bots.some((s) => Math.hypot(s.vx, s.vy) > 10 || s.x !== 430)).toBe(true);
     room.match!.devSetClock(10);
-    for (let i = 0; i < 5; i++) room.tick();
+    for (let i = 0; i < 400 && room.phase !== 'RESULTS'; i++) room.tick();
     expect(room.phase).toBe('RESULTS');
     room.removeTestPlayers();
     expect(room.players.length).toBe(1);
@@ -242,6 +242,48 @@ describe('local test players', () => {
     advanceTime(10000);
     room.housekeeping();
     expect(room.players.find((p) => p.id === room.hostId)?.testPlayer ?? false).toBe(false);
+  });
+});
+
+describe('easter eggs and dumb bots', () => {
+  function blowout(opts: { quipChance: number; quipCooldownMs: number }) {
+    let t = 1000;
+    const room = new Room({ now: () => t, random: () => 0, ...opts });
+    const me = room.join('Me');
+    if (!me.ok) throw new Error();
+    room.addTestPlayer('dumb');
+    const host = { kind: 'player' as const, id: me.player.id };
+    room.advance(host, 'START');
+    room.advance(host, 'CHOOSE_HOCKEY');
+    room.setTeam(me.player.id, 'BLUE');
+    room.setReady(me.player.id, true);
+    room.housekeeping();
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    while (room.phase !== 'PLAYING') room.tick();
+    const m = room.match!;
+    const quips: number[] = [];
+    for (let g = 0; g < 6; g++) {
+      while (room.phase !== 'PLAYING') room.tick();
+      m.devForceGoal('BLUE');
+      for (let i = 0; i < 5; i++) room.tick();
+      for (const e of m.drainEvents()) if (e.type === 'quip') quips.push(m.score.BLUE);
+      t += 1000;
+    }
+    return quips;
+  }
+
+  it('quip fires only once the losing team is down 3+ and the leader scores again; respects cooldown', () => {
+    expect(blowout({ quipChance: 1, quipCooldownMs: 0 })).toEqual([4, 5, 6]);
+    expect(blowout({ quipChance: 1, quipCooldownMs: 60_000 })).toEqual([4]);
+    expect(blowout({ quipChance: 0, quipCooldownMs: 0 })).toEqual([]);
+  });
+
+  it('dumb bots are test players that never host and play badly', () => {
+    const { room } = makeRoom();
+    room.addTestPlayer('dumb');
+    expect(room.hostId).toBeNull();
+    expect(room.publicState().players[0]).toMatchObject({ test: true, dumb: true, name: 'Dumb Bot A' });
   });
 });
 

@@ -209,7 +209,7 @@ async function main() {
     const clockAtGoal = during.clockMs;
     await sleep(1000);
     assert(Math.abs(tv.snaps.at(-1)!.clockMs - clockAtGoal) < 50, 'clock ran during goal pause');
-    await waitFor(() => tv.state?.phase === 'PLAYING', 4000, 'PLAYING after goal');
+    await waitFor(() => tv.snaps.at(-1)?.phase === 'PLAYING', 4000, 'PLAYING after goal');
     const s = tv.snaps.at(-1)!;
     assert(s.score[0] === start[0] + 1, 'score changed again');
     assert(Math.abs(s.puck[0] - 600) < 40, `puck not reset to center (${s.puck[0]})`);

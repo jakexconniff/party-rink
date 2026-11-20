@@ -38,8 +38,12 @@ export interface Callout {
 /** Visual effects fed by match events (see Tv.tsx). */
 export interface FxState {
   callouts: Callout[];
+  /** easter-egg chat bubbles that follow a skater */
+  quips: { n: number; text: string; born: number }[];
   shakeUntil: number;
 }
+
+const QUIP_SHOW_MS = 3500;
 
 interface Props {
   buffer: React.MutableRefObject<SnapBuffer>;
@@ -630,6 +634,44 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
         ctx.strokeText(c.text, cx2, cy2 - 60 * k - rise);
         ctx.fillStyle = c.color;
         ctx.fillText(c.text, cx2, cy2 - 60 * k - rise);
+        ctx.globalAlpha = 1;
+      }
+      // easter-egg chat bubbles over a (losing) skater
+      fx.current.quips = fx.current.quips.filter((q) => now - q.born < QUIP_SHOW_MS);
+      for (const q of fx.current.quips) {
+        const sk = snap.sk.find((s) => s.n === q.n);
+        if (!sk) continue;
+        const z = S(sk.y);
+        const [px, py] = P(sk.x, sk.y);
+        const age = now - q.born;
+        const pop = age < 150 ? 0.5 + (age / 150) * 0.5 : 1;
+        ctx.globalAlpha = age > QUIP_SHOW_MS - 400 ? (QUIP_SHOW_MS - age) / 400 : 1;
+        ctx.font = `900 ${18 * z * pop}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const tw = ctx.measureText(q.text).width;
+        const bw = tw + 24 * z;
+        const bh = 34 * z * pop;
+        const bx = px - bw / 2;
+        const by = py - 120 * z - bh;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#0b1d33';
+        ctx.lineWidth = 3 * z;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 12 * z);
+        ctx.fill();
+        ctx.stroke();
+        // speech-bubble tail
+        ctx.beginPath();
+        ctx.moveTo(px - 8 * z, by + bh - 1);
+        ctx.lineTo(px, by + bh + 14 * z);
+        ctx.lineTo(px + 8 * z, by + bh - 1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillRect(px - 7 * z, by + bh - 3 * z, 14 * z, 4 * z);
+        ctx.fillStyle = '#0b1d33';
+        ctx.fillText(q.text, px, by + bh / 2 + 1);
         ctx.globalAlpha = 1;
       }
       void SK_R;

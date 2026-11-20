@@ -40,6 +40,8 @@ export interface PublicPlayer {
   inMatch: boolean;
   /** laptop-added test player (local testing only) */
   test: boolean;
+  /** a deliberately bad test bot */
+  dumb: boolean;
 }
 
 export interface PlayerStat {
@@ -73,6 +75,8 @@ export type MatchEvent =
   | { type: 'pickup'; by: number; x: number; y: number }
   | { type: 'cleanCatch'; by: number; x: number; y: number }
   | { type: 'whiff'; by: number; x: number; y: number }
+  /** easter egg: a chat bubble over a player on a badly losing team */
+  | { type: 'quip'; by: number; text: string }
   | { type: 'end' };
 
 export interface RoomState {

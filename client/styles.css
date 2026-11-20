@@ -697,16 +697,19 @@ body.phone {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
+/* Right half = two equal full-width tiles stacked: POKE/PASS on top, SHOOT on the bottom. */
 .btn-zone {
   width: 50%;
-  position: relative;
-  --shoot: min(62vh, 22vw);
-  --pass: min(46vh, 16vw);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 6px 8px 8px;
 }
 .act {
-  position: absolute;
-  border-radius: 50%;
-  font-size: clamp(18px, 6vh, 28px);
+  flex: 1;
+  position: relative;
+  border-radius: 18px;
+  font-size: clamp(20px, 7vh, 32px);
   font-weight: 900;
   letter-spacing: 0.03em;
   touch-action: none;
@@ -716,40 +719,32 @@ body.phone {
   align-items: center;
   justify-content: center;
   line-height: 1.1;
-  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 3px rgba(255, 255, 255, 0.12);
   transition: transform 0.04s;
 }
 .act small {
-  font-size: clamp(10px, 3.2vh, 13px);
+  font-size: clamp(10px, 3.4vh, 14px);
   font-weight: 700;
   opacity: 0.85;
-  max-width: 80%;
+  max-width: 88%;
 }
 .act.down {
-  transform: translateY(4px) scale(0.97);
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 0 4px rgba(255, 255, 255, 0.3);
+  transform: translateY(3px) scale(0.98);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), inset 0 0 0 3px rgba(255, 255, 255, 0.35);
   filter: brightness(1.25);
 }
 .act.pass,
 .act.poke {
-  width: var(--pass);
-  height: var(--pass);
-  right: calc(var(--shoot) + 6%);
-  top: 6%;
   color: #fff;
 }
 .act.pass {
-  background: radial-gradient(circle at 40% 30%, #4fe0a5, #12865a);
+  background: linear-gradient(180deg, #4fe0a5, #12865a);
 }
 .act.poke {
-  background: radial-gradient(circle at 40% 30%, #a9b4c9, #556179);
+  background: linear-gradient(180deg, #a9b4c9, #556179);
 }
 .act.shoot {
-  width: var(--shoot);
-  height: var(--shoot);
-  right: 5%;
-  bottom: 7%;
-  background: radial-gradient(circle at 40% 30%, #ffe27a, #e09b00);
+  background: linear-gradient(180deg, #ffe27a, #e09b00);
   color: #3a2700;
 }
 .act.shoot.inactive {

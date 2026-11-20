@@ -125,6 +125,13 @@ export const CFG = {
     deflectMinOut: 140,
   },
 
+  faceoff: {
+    /** after a goal, the scoring team's center starts this much further from the puck */
+    scorerSetBack: 120,
+    /** the puck drop varies up/down by up to this much (not on the opening faceoff) */
+    dropJitter: 50,
+  },
+
   countdownMs: 3000,
   goalPauseMs: 2000,
   inputTimeoutMs: 500,

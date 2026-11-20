@@ -487,10 +487,37 @@ describe('match flow', () => {
     expect(m.phase).toBe('PLAYING');
     expect(m.score.RED).toBe(1);
     expect(m.puck.x).toBeCloseTo(600, 0);
-    expect(m.puck.y).toBeCloseTo(340, 0);
+    expect(Math.abs(m.puck.y - 340)).toBeLessThanOrEqual(CFG.faceoff.dropJitter);
     expect(m.puck.carrierId).toBeNull();
     expect(m.getSkater('a')!.x).toBeLessThan(600);
     expect(m.getSkater('b')!.x).toBeGreaterThan(600);
+  });
+
+  it('faceoffs: the team that just scored starts its center further back; centers rotate', () => {
+    const players = [P('r1', 1, 'RED'), P('r2', 3, 'RED'), P('b1', 2, 'BLUE'), P('b2', 4, 'BLUE')];
+    const m = new HockeyMatch(players, 300_000, 5);
+    m.goaliesEnabled = false;
+    const nearest = (team: 'RED' | 'BLUE') =>
+      m.skaters
+        .filter((s) => s.team === team)
+        .map((s) => ({ id: s.id, d: Math.hypot(s.x - m.puck.x, s.y - m.puck.y) }))
+        .sort((a, b) => a.d - b.d)[0];
+    // opening faceoff is symmetric
+    expect(nearest('RED').d).toBeCloseTo(nearest('BLUE').d, 5);
+    const firstRedCenter = nearest('RED').id;
+    while (m.phase === 'COUNTDOWN') m.step();
+    const centers: string[] = [firstRedCenter];
+    for (let g = 0; g < 3; g++) {
+      m.devForceGoal('RED');
+      while (m.phase === 'PLAYING') m.step();
+      while (m.phase === 'GOAL_PAUSE') m.step();
+      // RED just scored → BLUE's center is closer to the puck
+      expect(nearest('BLUE').d).toBeLessThan(nearest('RED').d - 50);
+      centers.push(m.skaters.filter((s) => s.team === 'RED').sort((a, b) => b.x - a.x)[0].id);
+    }
+    // red's front player alternates between its two skaters
+    expect(new Set(centers).size).toBe(2);
+    expect(centers[1]).not.toBe(centers[2]);
   });
 
   it('clock only runs while playing: game ends on active time', () => {

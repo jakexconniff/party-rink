@@ -14,7 +14,7 @@ export function Tv() {
   const [toast, setToast] = useState<string | null>(null);
   const buffer = useRef<SnapBuffer>({ items: [] });
   const roster = useRef<RosterInfo>({});
-  const fx = useRef<FxState>({ callouts: [], shakeUntil: 0 });
+  const fx = useRef<FxState>({ callouts: [], quips: [], shakeUntil: 0 });
   const [lastGoalInfo, setLastGoalInfo] = useState<{ scorer: string | null; hatTrick: boolean } | null>(null);
 
   useEffect(() => {
@@ -39,6 +39,9 @@ export function Tv() {
           break;
         case 'whiff':
           add('whiff', '#b9c4d6', e.x, e.y);
+          break;
+        case 'quip':
+          fx.current.quips.push({ n: e.by, text: e.text, born: performance.now() });
           break;
       }
     };
@@ -149,7 +152,7 @@ function PlayerLine({ p }: { p: PublicPlayer }) {
       <Badge p={p} />
       <span>{p.name}</span>
       {p.isHost ? <span className="pill host">HOST</span> : null}
-      {p.test ? <span className="pill off">TEST</span> : null}
+      {p.test ? <span className="pill off">{p.dumb ? 'DUMB BOT' : 'TEST'}</span> : null}
       {!p.connected ? <span className="pill off">AWAY</span> : null}
     </>
   );
@@ -439,8 +442,11 @@ function AdminPanel({ room, socket }: { room: RoomState; socket: ReturnType<type
   return (
     <div className="admin-panel">
       <div className="lbl">Testing alone? Add test players</div>
-      <button disabled={!canAddTest} onClick={() => socket.emit('admin:addTestPlayer')}>
+      <button disabled={!canAddTest} onClick={() => socket.emit('admin:addTestPlayer', { kind: 'smart' })}>
         + Add test player ({testCount})
+      </button>
+      <button disabled={!canAddTest} onClick={() => socket.emit('admin:addTestPlayer', { kind: 'dumb' })}>
+        + Add dumb bot (easy)
       </button>
       {testCount ? (
         <button disabled={inMatch} onClick={() => socket.emit('admin:removeTestPlayers')}>

@@ -284,9 +284,9 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
     );
     socket.on(
       'admin:addTestPlayer',
-      guard(() => {
+      guard((payload: { kind?: unknown } = {}) => {
         adminGuard();
-        room.addTestPlayer();
+        room.addTestPlayer(payload?.kind === 'dumb' ? 'dumb' : 'smart');
       }),
     );
     socket.on(

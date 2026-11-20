@@ -113,12 +113,13 @@ export interface MatchOptions {
 const { goal, skater: SK, puck: PK } = CFG;
 const G = CFG.goalie;
 
-/** Faceoff formations for one team on the LEFT half of a full rink, facing right. */
+/** Faceoff formations for one team on the LEFT half of a full rink, facing right.
+ *  Slot 0 is always the "center" — the player nearest the puck. Who takes it rotates each faceoff. */
 const FORMATIONS: Record<number, [number, number][]> = {
-  1: [[430, 340]],
+  1: [[440, 340]],
   2: [
-    [440, 270],
-    [440, 410],
+    [450, 340],
+    [320, 230],
   ],
   3: [
     [450, 340],
@@ -126,10 +127,10 @@ const FORMATIONS: Record<number, [number, number][]> = {
     [320, 460],
   ],
   4: [
-    [450, 260],
-    [450, 420],
-    [290, 190],
-    [290, 490],
+    [450, 340],
+    [330, 200],
+    [330, 480],
+    [230, 340],
   ],
 };
 
@@ -152,6 +153,8 @@ export class HockeyMatch {
   events: MatchEvent[] = [];
   /** tests only: disable goalie collisions */
   goaliesEnabled = true;
+  /** called right after a goal is scored, with the score before that goal */
+  onGoal?: (team: Team, before: Record<Team, number>) => void;
   private rand: () => number;
 
   constructor(players: MatchPlayer[], durationMs: number, seed = 1, opts: MatchOptions = {}) {
@@ -390,16 +393,27 @@ export class HockeyMatch {
 
   // ---------------------------------------------------------------- phases
 
+  /** how many faceoffs have happened (drives the center rotation) */
+  faceoffCount = 0;
+
   faceoff() {
     const R = this.R;
+    // small vertical variation of the drop so openings aren't identical (same for both teams → still fair)
+    const dropY = this.faceoffCount === 0 ? R.cy : R.cy + (this.rand() - 0.5) * 2 * CFG.faceoff.dropJitter * R.sy;
     for (const team of ['RED', 'BLUE'] as Team[]) {
       const members = this.skaters.filter((s) => s.team === team);
-      const form = FORMATIONS[clamp(members.length, 1, 4)] ?? FORMATIONS[4];
-      members.forEach((s, i) => {
+      const n = members.length;
+      const form = FORMATIONS[clamp(n, 1, 4)] ?? FORMATIONS[4];
+      // rotate who takes the center slot
+      const rot = n ? this.faceoffCount % n : 0;
+      const ordered = members.map((_, i) => members[(i + rot) % n]);
+      // catch-up: the team that just scored starts its center further back
+      const handicap = this.lastGoal === team ? CFG.faceoff.scorerSetBack : 0;
+      ordered.forEach((s, i) => {
         const [fx, fy] = form[i % form.length];
-        const x = R.cx - (R.cx - fx) * R.sx;
+        const x = R.cx - (R.cx - fx + (i === 0 ? handicap : 0)) * R.sx;
         s.x = team === 'RED' ? x : 2 * R.cx - x;
-        s.y = R.cy + (fy - R.cy) * R.sy;
+        s.y = R.cy + (fy - R.cy) * R.sy + (i === 0 ? dropY - R.cy : 0);
         s.vx = s.vy = 0;
         s.fx = team === 'RED' ? 1 : -1;
         s.fy = 0;
@@ -410,9 +424,10 @@ export class HockeyMatch {
         s.catchArmedUntil = 0;
       });
     }
+    this.faceoffCount++;
     Object.assign(this.puck, {
       x: R.cx,
-      y: R.cy,
+      y: dropY,
       vx: 0,
       vy: 0,
       carrierId: null,
@@ -442,6 +457,7 @@ export class HockeyMatch {
 
   private scoreGoal(team: Team) {
     const p = this.puck;
+    const before = { ...this.score };
     this.score[team]++;
     this.lastGoal = team;
     this.phase = 'GOAL_PAUSE';
@@ -460,6 +476,7 @@ export class HockeyMatch {
     p.vx = p.vy = 0;
     p.carrierId = null;
     for (const s of this.skaters) s.chargingSince = null;
+    this.onGoal?.(team, before);
   }
 
   // ---------------------------------------------------------------- skaters
