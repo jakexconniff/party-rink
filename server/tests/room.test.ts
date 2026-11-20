@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Room, RoomError, sanitizeName } from '../room';
-import { sanitizeLook } from '../../shared/appearance';
+import { HEADS, describeLook, isCharacterHead, randomLook, sanitizeLook } from '../../shared/appearance';
 import type { Team } from '../../shared/types';
 
 function makeRoom() {
@@ -329,6 +329,70 @@ describe('appearance', () => {
     const red = room.players.filter((p) => p.team === 'RED');
     room.setLook(red[1].id, { ...red[1].look, accent: red[0].look.accent });
     expect(red[1].look.accent).not.toBe(red[0].look.accent);
+  });
+});
+
+describe('pause', () => {
+  it('host or laptop can pause; the clock freezes; resume runs a 3-2-1', () => {
+    const { room } = makeRoom();
+    const { ps, host } = toTeams(room, 1, 1);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    while (room.phase !== 'PLAYING') room.tick();
+    for (let i = 0; i < 30; i++) room.tick();
+    expect(() => room.setPaused({ kind: 'player', id: ps[1].player.id }, true)).toThrow(/host/i);
+    room.setPaused(host, true);
+    expect(room.phase).toBe('PAUSED');
+    const clock = room.match!.clockMs;
+    for (let i = 0; i < 300; i++) room.tick();
+    expect(room.match!.clockMs).toBe(clock);
+    room.setPaused({ kind: 'admin' }, false);
+    expect(room.phase).toBe('COUNTDOWN');
+    for (let i = 0; i < 200; i++) room.tick();
+    expect(room.phase).toBe('PLAYING');
+    expect(room.match!.clockMs).toBeLessThan(clock);
+  });
+
+  it('pausing during a goal celebration resumes the celebration', () => {
+    const { room } = makeRoom();
+    const { host } = toTeams(room, 1, 1);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    while (room.phase !== 'PLAYING') room.tick();
+    room.match!.devForceGoal('RED');
+    for (let i = 0; i < 5; i++) room.tick();
+    expect(room.phase).toBe('GOAL_PAUSE');
+    room.setPaused(host, true);
+    room.setPaused(host, false);
+    expect(room.phase).toBe('GOAL_PAUSE');
+  });
+
+  it('cannot pause outside a match; ending a paused match goes to results', () => {
+    const { room } = makeRoom();
+    const { host } = toTeams(room, 1, 1);
+    expect(() => room.setPaused(host, true)).toThrow(RoomError);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    room.setPaused(host, true);
+    room.endMatch();
+    room.tick();
+    expect(room.phase).toBe('RESULTS');
+  });
+});
+
+describe('character heads', () => {
+  it('random looks sometimes use whole-head characters, all valid', () => {
+    let chars = 0;
+    for (let i = 0; i < 300; i++) {
+      const l = randomLook();
+      expect(sanitizeLook(l)).toEqual(l);
+      if (isCharacterHead(l.head)) chars++;
+    }
+    expect(chars).toBeGreaterThan(40);
+    expect(chars).toBeLessThan(200);
+    expect(describeLook({ skin: 0, head: HEADS.findIndex((h) => h.id === 'bear'), face: 0, body: 1, accent: 0 })).toBe(
+      'the yellow bear',
+    );
   });
 });
 

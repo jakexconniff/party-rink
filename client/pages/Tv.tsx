@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeSocket, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { RinkCanvas, type FxState, type RosterInfo, type SnapBuffer } from '../components/RinkCanvas';
+import { HelpSheet } from '../components/Help';
 import type { AdvanceAction, ErrorMsg, MatchEvent, PublicPlayer, RoomState, ServerInfo, Snapshot, Team } from '../../shared/types';
 
 export function Tv() {
@@ -90,12 +91,25 @@ export function Tv() {
     const r: RosterInfo = {};
     for (const p of room.players) r[p.number] = { name: p.name, connected: p.connected, look: p.look };
     roster.current = r;
-    if (!['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'RESULTS'].includes(room.phase)) buffer.current.items = [];
+    if (!['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED', 'RESULTS'].includes(room.phase)) buffer.current.items = [];
   }, [room]);
 
   const join = info?.urls[Math.min(urlIdx, Math.max(0, (info?.urls.length ?? 1) - 1))];
   const phase = room?.phase ?? 'LOBBY';
-  const inMatch = phase === 'COUNTDOWN' || phase === 'PLAYING' || phase === 'GOAL_PAUSE';
+  const inMatch = phase === 'COUNTDOWN' || phase === 'PLAYING' || phase === 'GOAL_PAUSE' || phase === 'PAUSED';
+
+  // Laptop shortcut: P or Space pauses/resumes the match (only works on the laptop itself).
+  useEffect(() => {
+    if (!info?.isLocal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'p' && e.key !== 'P' && e.key !== ' ') return;
+      if (!room || !['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'].includes(room.phase)) return;
+      e.preventDefault();
+      socket.emit('match:pause', { paused: room.phase !== 'PAUSED' });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [info?.isLocal, room, socket]);
 
   return (
     <div className="tv-root">
@@ -348,6 +362,13 @@ function MatchView({
             <div className="countdown-num">GO!</div>
           </div>
         ) : null}
+        {s?.phase === 'PAUSED' ? (
+          <div className="tv-paused">
+            <h2>⏸ PAUSED</h2>
+            <HelpSheet big />
+            <div className="check-msg">Host: Resume on your phone · Laptop: press P or Space</div>
+          </div>
+        ) : null}
         {s?.phase === 'GOAL_PAUSE' && s.lastGoal ? (
           <div className="overlay">
             <div className={`goal-banner ${s.lastGoal}`}>
@@ -436,7 +457,7 @@ function AdminPanel({ room, socket }: { room: RoomState; socket: ReturnType<type
       ['NEW_GAME', 'New game'],
     ],
   };
-  const inMatch = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE'].includes(room.phase);
+  const inMatch = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'].includes(room.phase);
   const canAddTest = ['LOBBY', 'GAME_SELECT', 'TEAMS'].includes(room.phase) && room.players.length < 8;
   const testCount = room.players.filter((p) => p.test).length;
   return (
@@ -466,6 +487,11 @@ function AdminPanel({ room, socket }: { room: RoomState; socket: ReturnType<type
             </button>
           ))
         : null}
+      {inMatch ? (
+        <button onClick={() => socket.emit('match:pause', { paused: room.phase !== 'PAUSED' })}>
+          {room.phase === 'PAUSED' ? '▶ Resume (or press P)' : '⏸ Pause (or press P)'}
+        </button>
+      ) : null}
       {inMatch ? <button onClick={() => socket.emit('admin:endMatch')}>End match now → results</button> : null}
       <div className="lbl">Safety</div>
       <button

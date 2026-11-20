@@ -278,6 +278,37 @@ export class HockeyMatch {
     this.clockMs = Math.max(0, ms);
   }
 
+  /** phase to return to after a pause */
+  private pausedFrom: MatchPhase | null = null;
+
+  /** Freeze everything (clock included). Returns false if there's nothing to pause. */
+  pause(): boolean {
+    if (this.phase !== 'PLAYING' && this.phase !== 'COUNTDOWN' && this.phase !== 'GOAL_PAUSE') return false;
+    this.pausedFrom = this.phase;
+    this.phase = 'PAUSED';
+    for (const s of this.skaters) {
+      // drop held buttons and charges so nothing fires on resume
+      s.chargingSince = null;
+      s.input = { ...NEUTRAL_INPUT };
+      s.vx = s.vy = 0;
+    }
+    // a loose puck keeps its velocity and continues after the countdown
+    return true;
+  }
+
+  /** Resume: a goal celebration continues; otherwise a fresh 3-2-1 so nobody gets jumped. */
+  resume(): boolean {
+    if (this.phase !== 'PAUSED') return false;
+    if (this.pausedFrom === 'GOAL_PAUSE') {
+      this.phase = 'GOAL_PAUSE';
+    } else {
+      this.phase = 'COUNTDOWN';
+      this.countdownMs = CFG.countdownMs;
+    }
+    this.pausedFrom = null;
+    return true;
+  }
+
   step() {
     const dtMs = CFG.dtMs;
     this.t += dtMs;
@@ -309,6 +340,7 @@ export class HockeyMatch {
         }
         return;
       case 'OVER':
+      case 'PAUSED':
         return;
       case 'PLAYING':
         break;

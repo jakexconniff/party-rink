@@ -65,3 +65,8 @@ On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match no
 | A button did nothing | `[rejected] #N name: CODE — reason` |
 | Phone shows the wrong screen | `[client #N name] showing …` next to `[phase] A → B` |
 | Phone keeps disconnecting | `[disconnect] #N name (reason)` |
+
+## Pause and help
+
+- **Pause:** the host holds the ⏸ button in the controller's top bar for about 1 second (a quick tap does nothing). On the laptop, press **P** or **Space** on the TV page, or use Admin → Pause. Resuming starts a 3-2-1 countdown.
+- **Help:** every phone has a **?** button (top-right) that opens the controls cheat sheet on that phone only, without pausing. The TV shows the same sheet while paused.

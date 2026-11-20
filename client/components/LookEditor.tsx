@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
-import { ACCENTS, BODIES, FACES, HEADS, LOOK_FIELDS, SKIN_TONES, randomLook, type Look } from '../../shared/appearance';
+import { ACCENTS, BODIES, FACES, HEADS, LOOK_FIELDS, SKIN_TONES, isCharacterHead, randomLook, type Look } from '../../shared/appearance';
 import type { PublicPlayer } from '../../shared/types';
 import { drawSkaterBody } from './drawSkater';
 
@@ -36,6 +36,7 @@ const ROWS: { key: keyof Look; label: string; name: (i: number) => string }[] = 
 
 export function LookEditor({ socket, self, players }: { socket: Socket; self: PublicPlayer; players: PublicPlayer[] }) {
   const look = self.look;
+  const character = isCharacterHead(look.head);
   const set = (next: Look) => socket.emit('player:look', { look: next });
   const step = (key: keyof Look, d: number) => {
     const n = LOOK_FIELDS[key];
@@ -54,24 +55,30 @@ export function LookEditor({ socket, self, players }: { socket: Socket; self: Pu
       </div>
       <div className="look-rows">
         <div className="look-title">Your look</div>
-        {ROWS.map((r) => (
-          <div className="look-row" key={r.key}>
-            <span className="look-label">{r.label}</span>
-            <button className="arrow" onClick={() => step(r.key, -1)} aria-label={`Previous ${r.label}`}>
-              ◀
-            </button>
-            <span className="look-value">
-              {r.key === 'skin' ? (
-                <span className="swatch" style={{ background: SKIN_TONES[look.skin] }} />
-              ) : (
-                r.name(look[r.key])
-              )}
-            </span>
-            <button className="arrow" onClick={() => step(r.key, 1)} aria-label={`Next ${r.label}`}>
-              ▶
-            </button>
-          </div>
-        ))}
+        {ROWS.map((r) => {
+          // whole-head characters (Bear, Robot…) replace skin and face
+          const na = character && (r.key === 'skin' || r.key === 'face');
+          return (
+            <div className={`look-row ${na ? 'na' : ''}`} key={r.key}>
+              <span className="look-label">{r.label}</span>
+              <button className="arrow" disabled={na} onClick={() => step(r.key, -1)} aria-label={`Previous ${r.label}`}>
+                ◀
+              </button>
+              <span className="look-value">
+                {na ? (
+                  'n/a'
+                ) : r.key === 'skin' ? (
+                  <span className="swatch" style={{ background: SKIN_TONES[look.skin] }} />
+                ) : (
+                  r.name(look[r.key])
+                )}
+              </span>
+              <button className="arrow" disabled={na} onClick={() => step(r.key, 1)} aria-label={`Next ${r.label}`}>
+                ▶
+              </button>
+            </div>
+          );
+        })}
         <div className="look-row">
           <span className="look-label">Color</span>
           <span className="swatches">

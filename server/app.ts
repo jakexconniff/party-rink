@@ -263,6 +263,13 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
       }),
     );
     socket.on(
+      'match:pause',
+      guard((payload: { paused?: unknown } = {}) => {
+        const actor: Actor = role === 'tv' ? (adminGuard(), { kind: 'admin' }) : me();
+        room.setPaused(actor, payload?.paused === true);
+      }),
+    );
+    socket.on(
       'player:look',
       guard((payload: { look?: unknown } = {}) => {
         me();

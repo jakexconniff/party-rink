@@ -11,8 +11,9 @@ export type Phase =
   | 'COUNTDOWN'
   | 'PLAYING'
   | 'GOAL_PAUSE'
+  | 'PAUSED'
   | 'RESULTS';
-export type MatchPhase = 'COUNTDOWN' | 'PLAYING' | 'GOAL_PAUSE' | 'OVER';
+export type MatchPhase = 'COUNTDOWN' | 'PLAYING' | 'GOAL_PAUSE' | 'PAUSED' | 'OVER';
 
 export const DURATIONS = [300, 600, 900] as const;
 export type Duration = (typeof DURATIONS)[number];

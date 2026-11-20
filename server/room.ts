@@ -575,6 +575,14 @@ export class Room {
     for (const p of this.players) p.inMatch = false;
   }
 
+  /** Host (or laptop admin) pauses/resumes the match. */
+  setPaused(actor: Actor, paused: boolean) {
+    this.requireHost(actor);
+    if (this.stage !== 'MATCH' || !this.match) throw new RoomError('BAD_PHASE', 'Nothing to pause');
+    const ok = paused ? this.match.pause() : this.match.resume();
+    if (ok) this.dirty = true;
+  }
+
   /** Admin: end the current match immediately (goes to results). */
   endMatch() {
     if (this.stage === 'MATCH' && this.match) {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { makeSocket, storage, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { Controller } from '../components/Controller';
 import { LookEditor } from '../components/LookEditor';
+import { HelpOverlay } from '../components/Help';
 import {
   DURATIONS,
   MAX_NAME_LENGTH,
@@ -31,6 +32,7 @@ export function Join() {
   const [moved, setMoved] = useState(false);
   const [cs, setCs] = useState<ControlState | null>(null);
   const [everConnected, setEverConnected] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Forward phone-side problems to the server log (one place to troubleshoot).
   useEffect(() => {
@@ -129,7 +131,7 @@ export function Join() {
   // Log which screen the phone is showing whenever it changes.
   const screen = !me || !self || !room
     ? 'join-form'
-    : ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE'].includes(room.phase) && self.inMatch && self.team
+    : ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'].includes(room.phase) && self.inMatch && self.team
       ? 'controller'
       : `screen:${room.phase}`;
   useEffect(() => {
@@ -150,8 +152,12 @@ export function Join() {
       </span>
       <span className="conn-label">
         <span className={`dot ${connected ? '' : 'bad'}`} />
-        {connected ? 'Connected' : everConnected ? 'Reconnecting…' : 'Connecting…'}
+        {connected ? 'Connected' : everConnected ? 'Reconnecting…' : 'Connecting…'}{' '}
+        <button className="help-btn" onClick={() => setHelpOpen(true)} aria-label="How to play">
+          ?
+        </button>
       </span>
+      {helpOpen ? <HelpOverlay onClose={() => setHelpOpen(false)} /> : null}
     </div>
   );
 
@@ -217,7 +223,7 @@ export function Join() {
   const phase = room.phase;
 
   // --------------------------------------------------------- controller
-  const matchPhases = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE'];
+  const matchPhases = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'];
   if (matchPhases.includes(phase) && self.inMatch && self.team) {
     return (
       <>
@@ -228,6 +234,7 @@ export function Join() {
           name={self.name}
           number={self.number}
           look={self.look}
+          isHost={room.hostId === self.id}
           connected={connected}
         />
         <div className="rotate-msg">
@@ -407,6 +414,7 @@ function PhaseView({
     case 'COUNTDOWN':
     case 'PLAYING':
     case 'GOAL_PAUSE':
+    case 'PAUSED':
       return (
         <>
           <h1>Match in progress</h1>

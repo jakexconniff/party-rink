@@ -1,5 +1,6 @@
 // Shared skater body drawing (TV rink + phone preview). Pure Canvas 2D, original simple shapes.
-import { ACCENTS, BODIES, FACES, HEADS, SKIN_TONES, type Look } from '../../shared/appearance';
+import { ACCENTS, BODIES, FACES, HEADS, SKIN_TONES, isCharacterHead, type Look } from '../../shared/appearance';
+import { drawCharacterHead } from './characterHeads';
 
 export const TEAM_COLORS = {
   red: '#ef3b4a',
@@ -81,6 +82,10 @@ export function drawSkaterBody(
   const hx = px;
   const hy = tTop - hr + 3 * z;
   let top = hy - hr;
+
+  if (isCharacterHead(look.head)) {
+    return drawCharacterHead(ctx, hx, hy, hr * 1.12, z, head, accent, base, Math.max(-1, Math.min(1, fx)));
+  }
 
   // things drawn behind the head
   if (head === 'afro') {

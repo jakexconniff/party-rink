@@ -3,17 +3,36 @@
 
 export const SKIN_TONES = ['#f8d8bd', '#eebf96', '#d39a6a', '#a86f45', '#7b4b2c', '#4e2f1c'] as const;
 
+/** `character: true` heads replace the whole head, so Skin and Face don't apply to them. */
 export const HEADS = [
-  { id: 'helmet', label: 'Helmet' },
-  { id: 'bald', label: 'Bald' },
-  { id: 'spiky', label: 'Spiky hair' },
-  { id: 'afro', label: 'Afro' },
-  { id: 'mohawk', label: 'Mohawk' },
-  { id: 'beanie', label: 'Beanie' },
-  { id: 'viking', label: 'Viking' },
-  { id: 'crown', label: 'Crown' },
-  { id: 'cowboy', label: 'Cowboy hat' },
+  { id: 'helmet', label: 'Helmet', character: false },
+  { id: 'bald', label: 'Bald', character: false },
+  { id: 'spiky', label: 'Spiky hair', character: false },
+  { id: 'afro', label: 'Afro', character: false },
+  { id: 'mohawk', label: 'Mohawk', character: false },
+  { id: 'beanie', label: 'Beanie', character: false },
+  { id: 'viking', label: 'Viking', character: false },
+  { id: 'crown', label: 'Crown', character: false },
+  { id: 'cowboy', label: 'Cowboy hat', character: false },
+  // whole-head characters
+  { id: 'monster', label: 'Monster', character: true },
+  { id: 'clown', label: 'Clown', character: true },
+  { id: 'bear', label: 'Bear', character: true },
+  { id: 'panda', label: 'Panda', character: true },
+  { id: 'robot', label: 'Robot', character: true },
+  { id: 'alien', label: 'Alien', character: true },
+  { id: 'frog', label: 'Frog', character: true },
+  { id: 'pumpkin', label: 'Pumpkin', character: true },
+  { id: 'ninja', label: 'Ninja', character: true },
+  { id: 'astronaut', label: 'Astronaut', character: true },
+  { id: 'shark', label: 'Shark', character: true },
+  { id: 'chicken', label: 'Chicken', character: true },
+  { id: 'unicorn', label: 'Unicorn', character: true },
 ] as const;
+
+export const isCharacterHead = (head: number) => !!HEADS[head]?.character;
+/** chance a random look uses a whole-head character */
+export const RANDOM_CHARACTER_CHANCE = 0.33;
 
 export const FACES = [
   { id: 'none', label: 'Plain' },
@@ -56,9 +75,12 @@ export const LOOK_FIELDS = {
 
 export function randomLook(rand: () => number = Math.random): Look {
   const pick = (n: number) => Math.floor(rand() * n);
+  const normal = HEADS.map((h, i) => (h.character ? -1 : i)).filter((i) => i >= 0);
+  const chars = HEADS.map((h, i) => (h.character ? i : -1)).filter((i) => i >= 0);
+  const pool = rand() < RANDOM_CHARACTER_CHANCE ? chars : normal;
   return {
     skin: pick(LOOK_FIELDS.skin),
-    head: pick(LOOK_FIELDS.head),
+    head: pool[pick(pool.length)],
     face: pick(LOOK_FIELDS.face),
     body: pick(LOOK_FIELDS.body),
     accent: pick(LOOK_FIELDS.accent),
@@ -80,7 +102,9 @@ export function sanitizeLook(raw: unknown): Look | null {
 
 /** "the Pink one with the Afro" — used on the phone during the countdown. */
 export function describeLook(l: Look): string {
+  const color = ACCENTS[l.accent]?.label.toLowerCase();
+  if (isCharacterHead(l.head)) return `the ${color} ${HEADS[l.head].label.toLowerCase()}`;
   const head = HEADS[l.head]?.label.toLowerCase() ?? '';
   const face = l.face ? ` and ${FACES[l.face].label.toLowerCase()}` : '';
-  return `the ${ACCENTS[l.accent]?.label.toLowerCase()} one with the ${head}${face}`;
+  return `the ${color} one with the ${head}${face}`;
 }

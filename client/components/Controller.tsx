@@ -4,6 +4,7 @@ import type { ControlState, InputMsg, Team } from '../../shared/types';
 import { fmtClock } from '../net/socket';
 import { ACCENTS, describeLook, type Look } from '../../shared/appearance';
 import { SkaterPreview } from './LookEditor';
+import { HelpOverlay, HelpSheet } from './Help';
 
 const STICK_RADIUS = 62;
 const SEND_MIN_MS = 33; // ≤30 Hz on change
@@ -34,10 +35,53 @@ interface Props {
   name: string;
   number: number;
   look: Look;
+  isHost: boolean;
   connected: boolean;
 }
 
-export function Controller({ socket, cs, team, name, number, look, connected }: Props) {
+/** Host-only pause: press and HOLD ~1s (a filling bar shows progress) so it can't be hit by accident. */
+function HoldToPause({ onPause, disabled }: { onPause: () => void; disabled: boolean }) {
+  const [progress, setProgress] = useState(0);
+  const timer = useRef<number | null>(null);
+  const start = useRef(0);
+  const stop = () => {
+    if (timer.current !== null) cancelAnimationFrame(timer.current);
+    timer.current = null;
+    setProgress(0);
+  };
+  const tick = () => {
+    const p = Math.min(1, (performance.now() - start.current) / 1000);
+    setProgress(p);
+    if (p >= 1) {
+      stop();
+      onPause();
+      return;
+    }
+    timer.current = requestAnimationFrame(tick);
+  };
+  return (
+    <button
+      className="hold-pause"
+      disabled={disabled}
+      aria-label="Hold to pause"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        start.current = performance.now();
+        timer.current = requestAnimationFrame(tick);
+      }}
+      onPointerUp={stop}
+      onPointerCancel={stop}
+      onPointerLeave={stop}
+    >
+      <div className="fill" style={{ width: `${progress * 100}%` }} />
+      <span>⏸</span>
+    </button>
+  );
+}
+
+export function Controller({ socket, cs, team, name, number, look, connected, isHost }: Props) {
+  const [helpOpen, setHelpOpen] = useState(false);
   const input = useRef({ x: 0, y: 0, pass: false, shoot: false, cancel: false });
   const seq = useRef(Date.now() % 1e6); // monotonically increasing across reloads
   const lastSent = useRef(0);
@@ -257,16 +301,37 @@ export function Controller({ socket, cs, team, name, number, look, connected }: 
           <span className="red-t">{cs?.score[0] ?? 0}</span> – <span className="blue-t">{cs?.score[1] ?? 0}</span>{' '}
           · {fmtClock(cs?.clockMs ?? 0)}
         </span>
-        <span>
+        <span className="ctl-top-right">
           <span className={`dot ${connected ? '' : 'bad'}`} />
           {hasPuck ? (
             <>
               <span className="puck-dot" />
-              PUCK
+              PUCK{' '}
             </>
           ) : null}
+          {isHost ? (
+            <HoldToPause onPause={() => socket.emit('match:pause', { paused: true })} disabled={phase === 'PAUSED'} />
+          ) : (
+            <button className="help-btn" onClick={() => setHelpOpen(true)} aria-label="How to play">
+              ?
+            </button>
+          )}
         </span>
       </div>
+      {phase === 'PAUSED' ? (
+        <div className="pause-screen">
+          <h2>⏸ PAUSED</h2>
+          {isHost ? (
+            <button className="btn ok" onClick={() => socket.emit('match:pause', { paused: false })}>
+              ▶ Resume (3-2-1)
+            </button>
+          ) : (
+            <p className="hint-small">Waiting for the host to resume…</p>
+          )}
+          <HelpSheet />
+        </div>
+      ) : null}
+      {helpOpen ? <HelpOverlay onClose={() => setHelpOpen(false)} /> : null}
       <div className="ctl-body">
         <div
           ref={zoneEl}
