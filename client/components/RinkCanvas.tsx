@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import type { Snapshot, SkaterSnap } from '../../shared/types';
+import type { Look, Snapshot, SkaterSnap } from '../../shared/types';
+import { accentColor, drawSkaterBody } from './drawSkater';
 
 // World constants (mirror server/simulation/config.ts; rendering only).
 const W = 1200;
@@ -19,7 +20,7 @@ const COLORS = {
 };
 
 export interface RosterInfo {
-  [num: number]: { name: string; connected: boolean };
+  [num: number]: { name: string; connected: boolean; look?: Look };
 }
 
 export interface SnapBuffer {
@@ -44,6 +45,8 @@ export interface FxState {
 }
 
 const QUIP_SHOW_MS = 3500;
+/** cosmetic only — skaters are drawn larger than their 16-unit hitbox so hats/hair read from the couch */
+const SKATER_DRAW_SCALE = 1.2;
 
 interface Props {
   buffer: React.MutableRefObject<SnapBuffer>;
@@ -362,7 +365,7 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
             const red = s.tm === 0;
             const base = red ? COLORS.red : COLORS.blue;
             const dark = red ? COLORS.redDark : COLORS.blueDark;
-            const z = S(s.y);
+            const z = S(s.y) * SKATER_DRAW_SCALE; // drawn a bit larger than the hitbox so looks read on a TV
             const [px, py] = P(s.x, s.y);
             const off = !s.c;
             ctx.globalAlpha = off ? 0.45 : 1;
@@ -424,8 +427,9 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
             const dy = s.ch >= 0 ? s.ay : s.fy;
             const [hx, hy] = P(s.x + dx * 8, s.y + dy * 8);
             const [tx, ty] = P(s.x + dx * stickLen, s.y + dy * stickLen);
-            ctx.strokeStyle = s.pk ? '#ffffff' : '#5b3a1a';
-            ctx.lineWidth = 4 * k;
+            const look = roster.current[s.n]?.look;
+            ctx.strokeStyle = s.pk ? '#ffffff' : accentColor(look);
+            ctx.lineWidth = 4.5 * k;
             ctx.beginPath();
             ctx.moveTo(hx, hy - 14 * z);
             ctx.lineTo(tx, ty);
@@ -436,44 +440,19 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
               ctx.arc(tx, ty, 7 * k, 0, Math.PI * 2);
               ctx.fill();
             }
-            // legs
-            ctx.fillStyle = '#1b2433';
-            ctx.fillRect(px - 9 * z, py - 14 * z, 7 * z, 14 * z);
-            ctx.fillRect(px + 2 * z, py - 14 * z, 7 * z, 14 * z);
-            // torso
-            const tw = 30 * z;
-            const th = 26 * z;
-            const tyTop = py - 14 * z - th;
-            const grad = ctx.createLinearGradient(px - tw / 2, 0, px + tw / 2, 0);
-            grad.addColorStop(0, base);
-            grad.addColorStop(1, dark);
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.roundRect(px - tw / 2, tyTop, tw, th, 8 * z);
-            ctx.fill();
-            // number
-            ctx.fillStyle = '#fff';
-            ctx.font = `900 ${16 * z}px system-ui, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(String(s.n), px, tyTop + th / 2 + 1 * z);
-            // head + helmet
-            const hr = 10 * z;
-            const hyc = tyTop - hr + 2 * z;
-            ctx.fillStyle = '#f2c9a0';
-            ctx.beginPath();
-            ctx.arc(px, hyc, hr, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = dark;
-            ctx.beginPath();
-            ctx.arc(px, hyc - 1 * z, hr + 1 * z, Math.PI, 0);
-            ctx.fill();
+            // body, head, hair/hat, face
+            const headTop = drawSkaterBody(ctx, px, py, z, s.tm, s.n, look, s.fx);
+            const hyc = headTop + 10 * z; // used for stumble stars
+            void base;
+            void dark;
             // name label
             const info = roster.current[s.n];
             const label = (info?.name ?? `P${s.n}`).slice(0, 10);
             ctx.font = `800 ${15 * z}px system-ui, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
             const lw = ctx.measureText(label).width + 12 * z;
-            const ly2 = hyc - hr - 14 * z;
+            const ly2 = headTop - 12 * z;
             ctx.fillStyle = red ? 'rgba(157,18,32,0.9)' : 'rgba(13,71,168,0.9)';
             ctx.beginPath();
             ctx.roundRect(px - lw / 2, ly2 - 10 * z, lw, 20 * z, 6 * z);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { makeSocket, storage, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { Controller } from '../components/Controller';
+import { LookEditor } from '../components/LookEditor';
 import {
   DURATIONS,
   MAX_NAME_LENGTH,
@@ -220,7 +221,15 @@ export function Join() {
   if (matchPhases.includes(phase) && self.inMatch && self.team) {
     return (
       <>
-        <Controller socket={socket} cs={cs} team={self.team} name={self.name} number={self.number} connected={connected} />
+        <Controller
+          socket={socket}
+          cs={cs}
+          team={self.team}
+          name={self.name}
+          number={self.number}
+          look={self.look}
+          connected={connected}
+        />
         <div className="rotate-msg">
           <div className="icon">📱</div>
           Turn your phone sideways to play
@@ -240,6 +249,9 @@ export function Join() {
         <span>{self.name}</span>
         {isHost ? <span className="pill host">HOST</span> : null}
       </div>
+      {['LOBBY', 'GAME_SELECT', 'TEAMS', 'SETTINGS', 'RESULTS'].includes(phase) ? (
+        <LookEditor socket={socket} self={self} players={room.players} />
+      ) : null}
       <PhaseView room={room} self={self} isHost={isHost} advance={advance} socket={socket} />
     </div>
   );

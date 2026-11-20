@@ -263,6 +263,13 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
       }),
     );
     socket.on(
+      'player:look',
+      guard((payload: { look?: unknown } = {}) => {
+        me();
+        room.setLook(playerId!, payload?.look);
+      }),
+    );
+    socket.on(
       'match:duration',
       guard((payload: { seconds?: unknown } = {}) =>
         room.setDuration(role === 'tv' ? (adminGuard(), { kind: 'admin' }) : me(), payload?.seconds),

@@ -88,7 +88,7 @@ export function Tv() {
   useEffect(() => {
     if (!room) return;
     const r: RosterInfo = {};
-    for (const p of room.players) r[p.number] = { name: p.name, connected: p.connected };
+    for (const p of room.players) r[p.number] = { name: p.name, connected: p.connected, look: p.look };
     roster.current = r;
     if (!['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'RESULTS'].includes(room.phase)) buffer.current.items = [];
   }, [room]);

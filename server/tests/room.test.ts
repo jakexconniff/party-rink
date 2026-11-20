@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Room, RoomError, sanitizeName } from '../room';
+import { sanitizeLook } from '../../shared/appearance';
 import type { Team } from '../../shared/types';
 
 function makeRoom() {
@@ -284,6 +285,50 @@ describe('easter eggs and dumb bots', () => {
     room.addTestPlayer('dumb');
     expect(room.hostId).toBeNull();
     expect(room.publicState().players[0]).toMatchObject({ test: true, dumb: true, name: 'Dumb Bot A' });
+  });
+});
+
+describe('appearance', () => {
+  it('everyone gets a valid look on join; it survives reconnect', () => {
+    const { room } = makeRoom();
+    const [a] = joinN(room, 3);
+    const look = { ...room.getPlayer(a.player.id)!.look };
+    expect(sanitizeLook(look)).toEqual(look);
+    room.disconnect(a.player.id);
+    room.join('', a.token);
+    expect(room.getPlayer(a.player.id)!.look).toEqual(look);
+  });
+
+  it('setLook validates input and is blocked during a match', () => {
+    const { room } = makeRoom();
+    const { ps, host } = toTeams(room, 1, 1);
+    const id = ps[0].player.id;
+    room.setLook(id, { skin: 2, head: 3, face: 1, body: 2, accent: 4 });
+    expect(room.getPlayer(id)!.look).toEqual({ skin: 2, head: 3, face: 1, body: 2, accent: 4 });
+    expect(() => room.setLook(id, { skin: 99, head: 0, face: 0, body: 0, accent: 0 })).toThrow(RoomError);
+    expect(() => room.setLook(id, 'hat')).toThrow(RoomError);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    expect(() => room.setLook(id, { skin: 0, head: 0, face: 0, body: 0, accent: 0 })).toThrow(/after the match/);
+  });
+
+  it('teammates never share an accent colour', () => {
+    const { room } = makeRoom();
+    const ps = joinN(room, 8);
+    for (const p of ps) room.setLook(p.player.id, { skin: 0, head: 0, face: 0, body: 0, accent: 2 });
+    const host = { kind: 'player' as const, id: ps[0].player.id };
+    room.advance(host, 'START');
+    room.advance(host, 'CHOOSE_HOCKEY');
+    ps.forEach((p, i) => room.setTeam(p.player.id, i < 4 ? 'RED' : 'BLUE'));
+    room.housekeeping();
+    for (const team of ['RED', 'BLUE'] as const) {
+      const accents = room.players.filter((p) => p.team === team).map((p) => p.look.accent);
+      expect(new Set(accents).size).toBe(4);
+    }
+    // picking a teammate's colour gets you a free one instead
+    const red = room.players.filter((p) => p.team === 'RED');
+    room.setLook(red[1].id, { ...red[1].look, accent: red[0].look.accent });
+    expect(red[1].look.accent).not.toBe(red[0].look.accent);
   });
 });
 

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { ControlState, InputMsg, Team } from '../../shared/types';
 import { fmtClock } from '../net/socket';
+import { ACCENTS, describeLook, type Look } from '../../shared/appearance';
+import { SkaterPreview } from './LookEditor';
 
 const STICK_RADIUS = 62;
 const SEND_MIN_MS = 33; // ≤30 Hz on change
@@ -31,10 +33,11 @@ interface Props {
   team: Team;
   name: string;
   number: number;
+  look: Look;
   connected: boolean;
 }
 
-export function Controller({ socket, cs, team, name, number, connected }: Props) {
+export function Controller({ socket, cs, team, name, number, look, connected }: Props) {
   const input = useRef({ x: 0, y: 0, pass: false, shoot: false, cancel: false });
   const seq = useRef(Date.now() % 1e6); // monotonically increasing across reloads
   const lastSent = useRef(0);
@@ -321,7 +324,17 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
           </button>
         </div>
       </div>
-      {banner ? <div className="ctl-banner">{banner}</div> : null}
+      {phase === 'COUNTDOWN' ? (
+        <div className="find-me">
+          <SkaterPreview look={look} team={team === 'RED' ? 0 : 1} number={number} size={80} />
+          <span>
+            You're <b style={{ color: ACCENTS[look.accent]?.color }}>#{number}</b>,
+            <br />
+            {describeLook(look)}
+          </span>
+        </div>
+      ) : null}
+      {banner && phase !== 'COUNTDOWN' ? <div className="ctl-banner">{banner}</div> : null}
       {status && !banner ? (
         <div className="ctl-status" style={{ color: cs?.stumbling ? '#ffb020' : '#50e6ff' }}>
           {status}

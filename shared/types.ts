@@ -1,4 +1,6 @@
 // Types shared by server and clients. Keep this file free of runtime dependencies.
+import type { Look } from './appearance';
+export type { Look };
 
 export type Team = 'RED' | 'BLUE';
 export type Phase =
@@ -42,6 +44,7 @@ export interface PublicPlayer {
   test: boolean;
   /** a deliberately bad test bot */
   dumb: boolean;
+  look: Look;
 }
 
 export interface PlayerStat {

@@ -1,0 +1,86 @@
+// Player appearance: purely cosmetic (hitboxes never change). Indices into the option lists below,
+// so the wire format stays tiny. Add options at the END of a list to keep existing looks stable.
+
+export const SKIN_TONES = ['#f8d8bd', '#eebf96', '#d39a6a', '#a86f45', '#7b4b2c', '#4e2f1c'] as const;
+
+export const HEADS = [
+  { id: 'helmet', label: 'Helmet' },
+  { id: 'bald', label: 'Bald' },
+  { id: 'spiky', label: 'Spiky hair' },
+  { id: 'afro', label: 'Afro' },
+  { id: 'mohawk', label: 'Mohawk' },
+  { id: 'beanie', label: 'Beanie' },
+  { id: 'viking', label: 'Viking' },
+  { id: 'crown', label: 'Crown' },
+  { id: 'cowboy', label: 'Cowboy hat' },
+] as const;
+
+export const FACES = [
+  { id: 'none', label: 'Plain' },
+  { id: 'mustache', label: 'Mustache' },
+  { id: 'beard', label: 'Beard' },
+  { id: 'shades', label: 'Sunglasses' },
+] as const;
+
+export const BODIES = [
+  { id: 'small', label: 'Small', w: 0.82, h: 0.86 },
+  { id: 'medium', label: 'Medium', w: 1, h: 1 },
+  { id: 'big', label: 'Big', w: 1.25, h: 1.1 },
+] as const;
+
+/** Accent = gloves, stick and jersey stripe. Unique within a team so teammates are easy to tell apart. */
+export const ACCENTS = [
+  { color: '#ffd23f', label: 'Yellow' },
+  { color: '#3cff8c', label: 'Green' },
+  { color: '#ff5fd2', label: 'Pink' },
+  { color: '#50e6ff', label: 'Cyan' },
+  { color: '#ff8a3d', label: 'Orange' },
+  { color: '#b48cff', label: 'Purple' },
+] as const;
+
+export interface Look {
+  skin: number;
+  head: number;
+  face: number;
+  body: number;
+  accent: number;
+}
+
+export const LOOK_FIELDS = {
+  skin: SKIN_TONES.length,
+  head: HEADS.length,
+  face: FACES.length,
+  body: BODIES.length,
+  accent: ACCENTS.length,
+} as const;
+
+export function randomLook(rand: () => number = Math.random): Look {
+  const pick = (n: number) => Math.floor(rand() * n);
+  return {
+    skin: pick(LOOK_FIELDS.skin),
+    head: pick(LOOK_FIELDS.head),
+    face: pick(LOOK_FIELDS.face),
+    body: pick(LOOK_FIELDS.body),
+    accent: pick(LOOK_FIELDS.accent),
+  };
+}
+
+/** Validate an untrusted look from a phone. Returns null if anything is out of range. */
+export function sanitizeLook(raw: unknown): Look | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const out = {} as Look;
+  for (const [k, n] of Object.entries(LOOK_FIELDS) as [keyof Look, number][]) {
+    const v = r[k];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v >= n) return null;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** "the Pink one with the Afro" — used on the phone during the countdown. */
+export function describeLook(l: Look): string {
+  const head = HEADS[l.head]?.label.toLowerCase() ?? '';
+  const face = l.face ? ` and ${FACES[l.face].label.toLowerCase()}` : '';
+  return `the ${ACCENTS[l.accent]?.label.toLowerCase()} one with the ${head}${face}`;
+}

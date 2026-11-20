@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { HockeyMatch } from './simulation/match';
 import { CFG } from './simulation/config';
 import { LOSING_QUIPS, QUIP_RULES } from '../shared/quips';
+import { ACCENTS, randomLook, sanitizeLook, type Look } from '../shared/appearance';
 import {
   DURATIONS,
   MAX_NAME_LENGTH,
@@ -35,6 +36,7 @@ export interface Player {
   testPlayer: boolean;
   /** a deliberately bad test bot */
   dumbBot: boolean;
+  look: Look;
   lastSeq: number;
   lastInputAt: number;
 }
@@ -174,6 +176,7 @@ export class Room {
             inMatch: p.inMatch,
             test: p.testPlayer,
             dumb: p.dumbBot,
+            look: p.look,
           }),
         ),
       durationSeconds: this.durationSeconds,
@@ -230,6 +233,7 @@ export class Room {
       inMatch: false,
       testPlayer: false,
       dumbBot: false,
+      look: randomLook(this.random),
       lastSeq: -1,
       lastInputAt: 0,
     };
@@ -262,6 +266,7 @@ export class Room {
   housekeeping() {
     const now = this.now();
     this.balanceTestPlayers();
+    this.fixAccents();
     if (PRE_MATCH.includes(this.stage)) {
       for (const p of [...this.players]) {
         if (!p.connected && p.disconnectedAt !== null && now - p.disconnectedAt > this.pruneMs) {
@@ -351,6 +356,43 @@ export class Room {
       p.team = team;
       p.ready = false;
       this.dirty = true;
+    }
+  }
+
+  /** Change your look (any time except during a match). A taken team accent is swapped for a free one. */
+  setLook(id: string, raw: unknown) {
+    if (this.stage === 'MATCH') throw new RoomError('BAD_PHASE', 'Change your look after the match');
+    const p = this.getPlayer(id);
+    if (!p) throw new RoomError('UNKNOWN_PLAYER', 'Unknown player');
+    const look = sanitizeLook(raw);
+    if (!look) throw new RoomError('BAD_LOOK', 'Invalid look');
+    p.look = look;
+    if (p.team) {
+      const taken = new Set(this.players.filter((o) => o !== p && o.team === p.team).map((o) => o.look.accent));
+      if (taken.has(look.accent)) p.look.accent = this.freeAccent(taken, look.accent);
+    }
+    this.dirty = true;
+  }
+
+  private freeAccent(taken: Set<number>, from: number) {
+    for (let i = 1; i <= ACCENTS.length; i++) {
+      const a = (from + i) % ACCENTS.length;
+      if (!taken.has(a)) return a;
+    }
+    return from;
+  }
+
+  /** Teammates never share an accent color: the later joiner gets moved to a free one. */
+  private fixAccents() {
+    for (const team of ['RED', 'BLUE'] as Team[]) {
+      const taken = new Set<number>();
+      for (const p of this.players.filter((x) => x.team === team).sort((a, b) => a.joinedAt - b.joinedAt || a.number - b.number)) {
+        if (taken.has(p.look.accent)) {
+          p.look = { ...p.look, accent: this.freeAccent(taken, p.look.accent) };
+          this.dirty = true;
+        }
+        taken.add(p.look.accent);
+      }
     }
   }
 
