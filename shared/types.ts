@@ -42,11 +42,38 @@ export interface PublicPlayer {
   test: boolean;
 }
 
+export interface PlayerStat {
+  number: number;
+  name: string;
+  team: Team;
+  goals: number;
+  shots: number;
+  steals: number;
+  catches: number;
+  oneTimers: number;
+  perfects: number;
+}
+
 export interface MatchResult {
   red: number;
   blue: number;
   winner: Team | 'DRAW';
+  stats: PlayerStat[];
+  /** player number of the MVP, if anyone did anything */
+  mvp: number | null;
 }
+
+/** Gameplay events streamed to the TV for callouts/effects. Player references are numbers. */
+export type MatchEvent =
+  | { type: 'goal'; team: Team; scorer: number | null; goals: number; x: number; y: number }
+  | { type: 'steal'; by: number; from: number; x: number; y: number }
+  | { type: 'save'; team: Team; x: number; y: number }
+  | { type: 'shot'; by: number; speed: number; perfect: boolean; oneTimer: boolean; x: number; y: number }
+  | { type: 'pass'; by: number; x: number; y: number }
+  | { type: 'pickup'; by: number; x: number; y: number }
+  | { type: 'cleanCatch'; by: number; x: number; y: number }
+  | { type: 'whiff'; by: number; x: number; y: number }
+  | { type: 'end' };
 
 export interface RoomState {
   phase: Phase;
@@ -88,6 +115,10 @@ export interface SkaterSnap {
   c: 0 | 1;
   /** 1 while poke animation is showing */
   pk: 0 | 1;
+  /** 1 while stumbling after a whiffed poke */
+  st: 0 | 1;
+  /** 1 while speed-boosted after a clean catch */
+  bo: 0 | 1;
 }
 
 export interface GoalieSnap {
@@ -108,6 +139,8 @@ export interface Snapshot {
   puck: [number, number, number];
   sk: SkaterSnap[];
   gl: [GoalieSnap, GoalieSnap];
+  /** playable rink bounds for this match: minX, maxX, minY, maxY */
+  rk: [number, number, number, number];
 }
 
 export interface ControlState {
@@ -119,6 +152,12 @@ export interface ControlState {
   phase: MatchPhase | null;
   clockMs: number;
   score: [number, number];
+  /** 0..1, 1 = POKE ready */
+  pokeReady: number;
+  stumbling: boolean;
+  boosting: boolean;
+  /** a loose puck is about to reach you — tap POKE for a clean catch */
+  catchHint: boolean;
 }
 
 export interface JoinedMsg {

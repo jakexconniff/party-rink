@@ -34,6 +34,18 @@ On the laptop's TV page, click **Admin** (bottom-left), then **+ Add test player
 4. **Turn the phone sideways.** The left half is the joystick (drag anywhere). The right side has **PASS/POKE** (top) and **SHOOT** (bottom; tap, or hold to charge and aim with the stick).
 5. Watch the TV for the 3-2-1 countdown, your skater moving, goals with a 2-second pause, and the clock.
 
+### Skill moves to try
+
+| Move | How | What you'll see |
+|---|---|---|
+| **Steal** | Tap **POKE** right next to the opponent carrying the puck, facing them | "STOLEN!" on the TV. Bumping into someone never steals, it only slows them down. |
+| **Whiff** | Tap POKE with nothing nearby | Dizzy stars, half speed for a moment, and a longer POKE cooldown (the button greys out) |
+| **Perfect shot** | Hold SHOOT and release while the fill is in the **green band** (80–95%) | The aim arrow turns green, then "PERFECT!" and a faster shot. Holding too long makes the aim wobble (red). |
+| **One-timer** | Hold SHOOT *before* a teammate's pass reaches you | The puck is shot instantly on arrival ("ONE-TIMER!"). Aim with the stick. |
+| **Clean catch** | Tap POKE just as a loose puck reaches you (the button glows) | Speed boost ("CLEAN!") |
+
+Carrying the puck makes you a bit slower, so passing pays off. The rink is smaller for 2–4 players.
+
 ## 6. Finish quickly
 
 On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match now** jumps to results. On your phone, **Rematch** returns to teams and **New game** returns to game select.

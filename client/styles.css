@@ -841,3 +841,84 @@ body.phone {
     font-size: 18px;
   }
 }
+
+/* --- results stats / goal scorer --- */
+.goal-scorer {
+  font-size: 0.38em;
+  text-align: center;
+  font-weight: 800;
+  opacity: 0.95;
+}
+.mvp {
+  font-size: 2em;
+  font-weight: 900;
+  color: var(--gold);
+}
+table.stats {
+  border-collapse: collapse;
+  font-size: 1.15em;
+  min-width: 50em;
+}
+table.stats th {
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 0.8em;
+  padding: 0.3em 0.8em;
+}
+table.stats td {
+  padding: 0.35em 0.8em;
+  text-align: center;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+table.stats td:first-child {
+  text-align: left;
+}
+table.stats tr.is-mvp td {
+  background: rgba(255, 210, 63, 0.15);
+}
+/* --- controller extras --- */
+.poke-cool {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 16, 28, 0.55);
+  pointer-events: none;
+  transform-origin: top;
+}
+.act.catch-hint {
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45), 0 0 0 6px #50e6ff, 0 0 30px 8px rgba(80, 230, 255, 0.7);
+  animation: catchpulse 0.25s ease-in-out infinite alternate;
+}
+@keyframes catchpulse {
+  to {
+    transform: scale(1.05);
+  }
+}
+.sweet-spot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 80%;
+  height: 15%;
+  border-top: 3px solid #3cff8c;
+  border-bottom: 3px solid #3cff8c;
+  background: rgba(60, 255, 140, 0.25);
+  pointer-events: none;
+}
+.charge-fill.perfect {
+  background: rgba(60, 255, 140, 0.75);
+}
+.charge-fill.over {
+  background: rgba(255, 30, 30, 0.75);
+}
+.ctl-status {
+  position: absolute;
+  left: 0;
+  right: 50%;
+  top: 34px;
+  text-align: center;
+  font-weight: 900;
+  font-size: 18px;
+  pointer-events: none;
+}

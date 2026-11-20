@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeSocket, useConnected, useRoomState, fmtClock } from '../net/socket';
-import { RinkCanvas, type RosterInfo, type SnapBuffer } from '../components/RinkCanvas';
-import type { AdvanceAction, ErrorMsg, PublicPlayer, RoomState, ServerInfo, Snapshot, Team } from '../../shared/types';
+import { RinkCanvas, type FxState, type RosterInfo, type SnapBuffer } from '../components/RinkCanvas';
+import type { AdvanceAction, ErrorMsg, MatchEvent, PublicPlayer, RoomState, ServerInfo, Snapshot, Team } from '../../shared/types';
 
 export function Tv() {
   const socket = useMemo(() => makeSocket('tv'), []);
@@ -14,6 +14,39 @@ export function Tv() {
   const [toast, setToast] = useState<string | null>(null);
   const buffer = useRef<SnapBuffer>({ items: [] });
   const roster = useRef<RosterInfo>({});
+  const fx = useRef<FxState>({ callouts: [], shakeUntil: 0 });
+  const [lastGoalInfo, setLastGoalInfo] = useState<{ scorer: string | null; hatTrick: boolean } | null>(null);
+
+  useEffect(() => {
+    const name = (n: number) => roster.current[n]?.name ?? `P${n}`;
+    const add = (text: string, color: string, x: number, y: number, big = false) =>
+      fx.current.callouts.push({ text, color, x, y, born: performance.now(), big });
+    const onEvent = (e: MatchEvent) => {
+      switch (e.type) {
+        case 'goal':
+          fx.current.shakeUntil = performance.now() + 500;
+          setLastGoalInfo({ scorer: e.scorer ? `#${e.scorer} ${name(e.scorer)}` : null, hatTrick: e.goals === 3 });
+          break;
+        case 'steal':
+          add('STOLEN!', '#ffd23f', e.x, e.y);
+          break;
+        case 'shot':
+          if (e.oneTimer) add('ONE-TIMER!', '#ff8a3d', e.x, e.y, true);
+          else if (e.perfect) add('PERFECT!', '#3cff8c', e.x, e.y, true);
+          break;
+        case 'cleanCatch':
+          add('CLEAN!', '#50e6ff', e.x, e.y);
+          break;
+        case 'whiff':
+          add('whiff', '#b9c4d6', e.x, e.y);
+          break;
+      }
+    };
+    socket.on('match:event', onEvent);
+    return () => {
+      socket.off('match:event', onEvent);
+    };
+  }, [socket]);
 
   useEffect(() => {
     let stop = false;
@@ -70,7 +103,7 @@ export function Tv() {
           <h1 className="tv-title">Connecting…</h1>
         </div>
       ) : inMatch ? (
-        <MatchView room={room} snap={snap} buffer={buffer} roster={roster} />
+        <MatchView room={room} snap={snap} buffer={buffer} roster={roster} fx={fx} goalInfo={lastGoalInfo} />
       ) : phase === 'LOBBY' ? (
         <Lobby room={room} info={info} join={join} onPickUrl={setUrlIdx} />
       ) : phase === 'GAME_SELECT' ? (
@@ -258,11 +291,15 @@ function MatchView({
   snap,
   buffer,
   roster,
+  fx,
+  goalInfo,
 }: {
   room: RoomState;
   snap: Snapshot | null;
   buffer: React.MutableRefObject<SnapBuffer>;
   roster: React.MutableRefObject<RosterInfo>;
+  fx: React.MutableRefObject<FxState>;
+  goalInfo: { scorer: string | null; hatTrick: boolean } | null;
 }) {
   const s = snap;
   const countdown = s && s.phase === 'COUNTDOWN' ? Math.max(1, Math.ceil(s.countdownMs / 1000)) : null;
@@ -295,7 +332,7 @@ function MatchView({
         </div>
       </div>
       <div className="rink-wrap">
-        <RinkCanvas buffer={buffer} roster={roster} />
+        <RinkCanvas buffer={buffer} roster={roster} fx={fx} />
         {countdown ? (
           <div className="overlay">
             <div className="countdown-num" key={countdown}>
@@ -310,7 +347,10 @@ function MatchView({
         ) : null}
         {s?.phase === 'GOAL_PAUSE' && s.lastGoal ? (
           <div className="overlay">
-            <div className={`goal-banner ${s.lastGoal}`}>{s.lastGoal} SCORES!</div>
+            <div className={`goal-banner ${s.lastGoal}`}>
+              {goalInfo?.hatTrick ? 'HAT TRICK!' : `${s.lastGoal} SCORES!`}
+              {goalInfo?.scorer ? <div className="goal-scorer">{goalInfo.scorer}</div> : null}
+            </div>
           </div>
         ) : null}
       </div>
@@ -330,11 +370,43 @@ function Results({ room }: { room: RoomState }) {
       <div className={`winner ${r?.winner === 'RED' ? 'red-t' : r?.winner === 'BLUE' ? 'blue-t' : ''}`}>
         {r?.winner === 'DRAW' ? "IT'S A DRAW!" : `${r?.winner} WINS!`}
       </div>
-      <div className="teams-wrap">
-        <TeamColumn team="RED" players={room.players.filter((p) => p.team === 'RED' && p.inMatch)} />
-        <div className="vs">VS</div>
-        <TeamColumn team="BLUE" players={room.players.filter((p) => p.team === 'BLUE' && p.inMatch)} />
-      </div>
+      {r?.mvp ? (
+        <div className="mvp">
+          ⭐ MVP: #{r.mvp} {r.stats.find((p) => p.number === r.mvp)?.name}
+        </div>
+      ) : null}
+      {r?.stats.length ? (
+        <table className="stats">
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Goals</th>
+              <th>Shots</th>
+              <th>Steals</th>
+              <th>One-timers</th>
+              <th>Perfect</th>
+              <th>Clean catches</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...r.stats]
+              .sort((a, b) => (a.team === b.team ? b.goals - a.goals : a.team === 'RED' ? -1 : 1))
+              .map((p) => (
+                <tr key={p.number} className={p.number === r.mvp ? 'is-mvp' : ''}>
+                  <td>
+                    <span className={`num-badge ${p.team}`}>{p.number}</span> {p.name}
+                  </td>
+                  <td>{p.goals}</td>
+                  <td>{p.shots}</td>
+                  <td>{p.steals}</td>
+                  <td>{p.oneTimers}</td>
+                  <td>{p.perfects}</td>
+                  <td>{p.catches}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      ) : null}
       <div className="check-msg">{host ? `${host.name} (host): Rematch or New game on your phone` : 'Waiting for host…'}</div>
     </div>
   );

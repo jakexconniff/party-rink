@@ -379,7 +379,7 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
     } else if (!m) {
       snapAcc = 0;
     }
-    if (ctrlAcc >= 100) {
+    if (ctrlAcc >= 66) {
       ctrlAcc = 0;
       for (const [pid, sock] of socketsByPlayer) {
         const s = m?.getSkater(pid);
@@ -392,6 +392,10 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
           phase: m?.phase ?? null,
           clockMs: m ? Math.ceil(m.clockMs) : 0,
           score: m ? [m.score.RED, m.score.BLUE] : [0, 0],
+          pokeReady: s && m ? m.pokeReady(s) : 1,
+          stumbling: !!s && m!.t < s.stumbleUntil,
+          boosting: !!s && m!.t < s.boostUntil,
+          catchHint: !!s && m!.phase === 'PLAYING' && m!.catchHint(s),
         };
         sock.emit('player:controlState', cs);
       }

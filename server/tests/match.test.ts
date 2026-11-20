@@ -7,7 +7,7 @@ const P = (id: string, number: number, team: 'RED' | 'BLUE'): MatchPlayer => ({ 
 
 /** Match already in PLAYING with skaters parked in corners (out of the way). */
 function playing(players: MatchPlayer[] = [P('a', 1, 'RED'), P('b', 2, 'BLUE')], durationMs = 300_000) {
-  const m = new HockeyMatch(players, durationMs, 42);
+  const m = new HockeyMatch(players, durationMs, 42, { fullRink: true });
   while (m.phase === 'COUNTDOWN') m.step();
   m.skaters.forEach((s, i) => {
     s.x = 100 + i * 40;
@@ -25,6 +25,7 @@ function place(m: HockeyMatch, id: string, x: number, y: number, fx = 1, fy = 0)
 
 function give(m: HockeyMatch, id: string) {
   m.puck.carrierId = id;
+  m.puck.lastTouchId = id;
   m.puck.protectedUntil = 0;
   m.step(); // positions the puck on the stick
 }
@@ -165,29 +166,60 @@ describe('possession', () => {
     expect(m.puck.carrierId).toBe('a');
   });
 
-  it('body contact steals once, not every tick', () => {
+  it('body contact never steals, but slows the carrier', () => {
     const m = playing();
-    place(m, 'a', 500, 340);
+    const a = place(m, 'a', 500, 340);
     give(m, 'a');
     steps(m, ticks(CFG.pickupImmunityMs + 20));
-    m.drainEvents();
     place(m, 'b', 525, 340, -1, 0);
-    let changes = 0;
-    let last = m.puck.carrierId;
     for (let i = 0; i < ticks(700); i++) {
-      // both keep pushing into each other
-      const a = m.getSkater('a')!;
       const b = m.getSkater('b')!;
       m.setInput('a', { x: Math.sign(b.x - a.x) || 1, y: 0 });
       m.setInput('b', { x: Math.sign(a.x - b.x) || -1, y: 0 });
       m.step();
-      if (m.puck.carrierId !== last) {
-        changes++;
-        last = m.puck.carrierId;
-      }
+      expect(m.puck.carrierId).toBe('a');
     }
-    expect(changes).toBe(1);
-    expect(m.puck.carrierId).toBe('b');
+    expect(m.t).toBeLessThan(a.slowUntil + 1);
+  });
+
+  it('carrying the puck lowers top speed', () => {
+    const topSpeed = (carry: boolean) => {
+      const m = playing();
+      const a = place(m, 'a', 300, 150);
+      if (carry) give(m, 'a');
+      m.setInput('a', { x: 1, y: 0 });
+      steps(m, ticks(2000));
+      return Math.hypot(a.vx, a.vy);
+    };
+    const free = topSpeed(false);
+    const carrying = topSpeed(true);
+    expect(free).toBeCloseTo(CFG.skater.maxSpeed, 0);
+    expect(carrying).toBeCloseTo(CFG.skater.maxSpeed * CFG.skater.carrierSpeedFactor, 0);
+  });
+
+  it('a whiffed poke (nothing near) stumbles and gets a long cooldown; a close miss does not', () => {
+    const m = playing();
+    const a = place(m, 'a', 300, 340);
+    give(m, 'a');
+    const b = place(m, 'b', 800, 340, -1, 0);
+    steps(m, 5);
+    m.setInput('b', { pass: true });
+    m.step();
+    m.setInput('b', { pass: false });
+    expect(b.stumbleUntil).toBeGreaterThan(m.t);
+    expect(b.pokeCooldownUntil - m.t).toBeGreaterThan(CFG.poke.cooldownMs);
+    expect(m.drainEvents().some((e) => e.type === 'whiff')).toBe(true);
+    // close miss: carrier near but behind us
+    const m2 = playing();
+    place(m2, 'a', 500, 340, 1, 0);
+    give(m2, 'a');
+    const b2 = place(m2, 'b', 600, 340, 1, 0); // facing away, ~100 from carrier
+    steps(m2, 5);
+    m2.setInput('b', { pass: true });
+    m2.step();
+    expect(b2.stumbleUntil).toBeLessThanOrEqual(m2.t);
+    expect(m2.puck.carrierId).toBe('a');
+    void a;
   });
 
   it('teammates do not steal by contact', () => {
@@ -277,13 +309,137 @@ describe('shooting', () => {
   });
 });
 
+describe('skill moves', () => {
+  /** red 'a' passes to red 'c' standing at (650, 340) */
+  function passSetup() {
+    const m = playing([P('a', 1, 'RED'), P('c', 3, 'RED'), P('b', 2, 'BLUE')]);
+    m.goaliesEnabled = false;
+    place(m, 'a', 350, 340);
+    place(m, 'c', 650, 340, 1, 0);
+    place(m, 'b', 300, 600);
+    give(m, 'a');
+    return m;
+  }
+  const doPass = (m: HockeyMatch) => {
+    m.setInput('a', { pass: true });
+    m.step();
+    m.setInput('a', { pass: false });
+  };
+
+  it('one-timer: holding SHOOT as a teammate’s pass arrives fires instantly', () => {
+    const m = passSetup();
+    m.setInput('c', { shoot: true, x: 1, y: 0 });
+    m.step();
+    doPass(m);
+    let fired = false;
+    for (let i = 0; i < 90 && !fired; i++) {
+      m.step();
+      fired = m.drainEvents().some((e) => e.type === 'shot' && e.oneTimer);
+    }
+    expect(fired).toBe(true);
+    expect(m.puck.carrierId).toBeNull();
+    expect(m.puck.vx).toBeGreaterThan(CFG.oneTimer.speed * 0.9);
+    expect(m.getSkater('c')!.stats.oneTimers).toBe(1);
+    // releasing the button afterwards does nothing
+    m.setInput('c', { shoot: false });
+    m.step();
+    expect(m.getSkater('c')!.stats.shots).toBe(1);
+  });
+
+  it('without SHOOT held the pass is simply received', () => {
+    const m = passSetup();
+    doPass(m);
+    let n = 0;
+    while (m.puck.carrierId !== 'c' && n++ < 90) m.step();
+    expect(m.puck.carrierId).toBe('c');
+  });
+
+  it('clean catch: POKE just before the pass arrives gives a speed boost', () => {
+    const m = passSetup();
+    doPass(m);
+    const c = m.getSkater('c')!;
+    let pressed = false;
+    for (let i = 0; i < 90 && m.puck.carrierId !== 'c'; i++) {
+      if (!pressed && m.catchHint(c) && Math.hypot(m.puck.x - c.x, m.puck.y - c.y) < 80) {
+        m.setInput('c', { pass: true });
+        pressed = true;
+      }
+      m.step();
+    }
+    m.setInput('c', { pass: false });
+    expect(pressed).toBe(true);
+    expect(m.puck.carrierId).toBe('c');
+    expect(c.boostUntil).toBeGreaterThan(m.t);
+    expect(c.stats.catches).toBe(1);
+    expect(c.stumbleUntil).toBeLessThanOrEqual(m.t); // catch attempts never count as whiffs
+  });
+
+  it('perfect release (80–95% charge) beats a full charge', () => {
+    const speedAfter = (holdMs: number) => {
+      const m = playing();
+      m.goaliesEnabled = false;
+      place(m, 'a', 300, 340);
+      give(m, 'a');
+      shoot(m, 'a', ticks(holdMs) - 1, [1, 0]);
+      return { speed: Math.hypot(m.puck.vx, m.puck.vy), perfects: m.getSkater('a')!.stats.perfects };
+    };
+    const perfect = speedAfter(CFG.shot.chargeMs * 0.87);
+    const full = speedAfter(CFG.shot.chargeMs * 1.02);
+    expect(perfect.perfects).toBe(1);
+    expect(full.perfects).toBe(0);
+    expect(perfect.speed).toBeGreaterThan(full.speed + 50);
+  });
+
+  it('over-charging makes the aim wobble', () => {
+    const m = playing();
+    place(m, 'a', 300, 340);
+    give(m, 'a');
+    m.setInput('a', { shoot: true });
+    steps(m, ticks(CFG.shot.chargeMs + CFG.shot.overchargeWobbleRampMs));
+    const ys = new Set<number>();
+    for (let i = 0; i < 30; i++) {
+      m.step();
+      ys.add(Math.round(m.snapshot().sk[0].ay * 100));
+    }
+    expect(ys.size).toBeGreaterThan(3);
+  });
+
+  it('goals are credited to the last player of the scoring team to touch the puck', () => {
+    const m = playing();
+    m.goaliesEnabled = false;
+    place(m, 'a', 1000, 340);
+    give(m, 'a');
+    shoot(m, 'a', 1, [1, 0]);
+    while (m.phase === 'PLAYING') m.step();
+    const goal = m.drainEvents().find((e) => e.type === 'goal');
+    expect(goal && goal.type === 'goal' && goal.scorer).toBe(1);
+    expect(m.getSkater('a')!.stats.goals).toBe(1);
+  });
+
+  it('rink shrinks for small games', () => {
+    const two = new HockeyMatch([P('a', 1, 'RED'), P('b', 2, 'BLUE')], 1000);
+    const eight = new HockeyMatch(
+      Array.from({ length: 8 }, (_, i) => P(`p${i}`, i + 1, i < 4 ? 'RED' : 'BLUE')),
+      1000,
+    );
+    expect(two.R.maxX - two.R.minX).toBeLessThan(eight.R.maxX - eight.R.minX);
+    expect(eight.R.maxX).toBe(CFG.rink.maxX);
+    // everyone starts inside the smaller rink, on their own side
+    for (const s of two.skaters) {
+      expect(s.x).toBeGreaterThan(two.R.minX);
+      expect(s.x).toBeLessThan(two.R.maxX);
+    }
+    expect(two.goalies[1].x).toBeLessThan(two.R.maxX);
+  });
+});
+
 describe('goalies', () => {
   it('save some shots, miss others, never leave the crease band', () => {
     const r = rng(7);
     let goals = 0;
     let saves = 0;
     for (let i = 0; i < 60; i++) {
-      const m = new HockeyMatch([P('a', 1, 'RED'), P('b', 2, 'BLUE')], 300_000, 100 + i);
+      const m = new HockeyMatch([P('a', 1, 'RED'), P('b', 2, 'BLUE')], 300_000, 100 + i, { fullRink: true });
       while (m.phase === 'COUNTDOWN') m.step();
       m.skaters.forEach((s) => Object.assign(s, { x: 100, y: 100 + s.number * 40 }));
       steps(m, Math.floor(r() * 200)); // random goalie phase

@@ -1,7 +1,9 @@
 // Authoritative hockey match simulation. Pure: no timers, no I/O. Call step() at CFG.tickHz.
-import { CFG } from './config';
+import { CFG, rinkFor, type RinkDims } from './config';
 import { angleBetween, clamp, finite, lerp, norm, rng } from './math';
-import type { MatchPhase, Snapshot, Team } from '../../shared/types';
+import type { MatchEvent, MatchPhase, Snapshot, Team } from '../../shared/types';
+
+export type { MatchEvent };
 
 export interface SkaterInput {
   x: number;
@@ -18,6 +20,15 @@ export const NEUTRAL_INPUT: Readonly<SkaterInput> = Object.freeze({
   shoot: false,
   cancel: false,
 });
+
+export interface SkaterStats {
+  goals: number;
+  shots: number;
+  steals: number;
+  catches: number;
+  oneTimers: number;
+  perfects: number;
+}
 
 export interface Skater {
   id: string;
@@ -38,8 +49,19 @@ export interface Skater {
   aimY: number;
   passCooldownUntil: number;
   pokeCooldownUntil: number;
+  pokeCooldownLen: number;
   pokeShowUntil: number;
-  noContactStealUntil: number;
+  /** last time SHOOT went down while not carrying (for one-timers) */
+  shootPressedAt: number;
+  /** clean-catch armed until this time */
+  catchArmedUntil: number;
+  /** time of the last pickup (for late clean-catch presses) */
+  pickupAt: number;
+  pickupCaught: boolean;
+  stumbleUntil: number;
+  boostUntil: number;
+  slowUntil: number;
+  stats: SkaterStats;
 }
 
 export interface Puck {
@@ -50,9 +72,15 @@ export interface Puck {
   carrierId: string | null;
   lastReleasedBy: string | null;
   lastReleaseT: number;
+  /** how the puck was last launched */
+  launchKind: 'shot' | 'pass' | 'other';
+  /** last skater to have possession (for goal credit) */
+  lastTouchId: string | null;
   protectedUntil: number;
   /** increments every time the puck is launched or deflected; goalies react once per launch */
   launchId: number;
+  /** extra goalie reaction delay for this launch (perfect shots, one-timers) */
+  goalieDelayMs: number;
   /** pickups disabled until this time (dev hooks only) */
   ghostUntil: number;
 }
@@ -77,18 +105,15 @@ export interface MatchPlayer {
   team: Team;
 }
 
-export type MatchEvent =
-  | { type: 'goal'; team: Team }
-  | { type: 'possession'; playerId: string; steal: boolean }
-  | { type: 'save'; team: Team }
-  | { type: 'shot'; playerId: string; speed: number }
-  | { type: 'pass'; playerId: string; targetId: string | null }
-  | { type: 'end' };
+export interface MatchOptions {
+  /** always use the full-size rink regardless of player count (tests) */
+  fullRink?: boolean;
+}
 
-const { rink, goal, skater: SK, puck: PK } = CFG;
+const { goal, skater: SK, puck: PK } = CFG;
 const G = CFG.goalie;
 
-/** Faceoff formations for one team on the LEFT half, facing right. Mirrored for the right side. */
+/** Faceoff formations for one team on the LEFT half of a full rink, facing right. */
 const FORMATIONS: Record<number, [number, number][]> = {
   1: [[430, 340]],
   2: [
@@ -108,6 +133,8 @@ const FORMATIONS: Record<number, [number, number][]> = {
   ],
 };
 
+const emptyStats = (): SkaterStats => ({ goals: 0, shots: 0, steals: 0, catches: 0, oneTimers: 0, perfects: 0 });
+
 export class HockeyMatch {
   phase: MatchPhase = 'COUNTDOWN';
   /** simulated time in ms since match creation */
@@ -118,6 +145,7 @@ export class HockeyMatch {
   pauseMs = 0;
   score: Record<Team, number> = { RED: 0, BLUE: 0 };
   lastGoal: Team | null = null;
+  R: RinkDims;
   skaters: Skater[];
   puck: Puck;
   goalies: [Goalie, Goalie];
@@ -126,9 +154,10 @@ export class HockeyMatch {
   goaliesEnabled = true;
   private rand: () => number;
 
-  constructor(players: MatchPlayer[], durationMs: number, seed = 1) {
+  constructor(players: MatchPlayer[], durationMs: number, seed = 1, opts: MatchOptions = {}) {
     this.clockMs = durationMs;
     this.rand = rng(seed);
+    this.R = rinkFor(players.length, opts.fullRink);
     this.skaters = [...players]
       .sort((a, b) => a.number - b.number)
       .map((p) => ({
@@ -150,25 +179,36 @@ export class HockeyMatch {
         aimY: 0,
         passCooldownUntil: 0,
         pokeCooldownUntil: 0,
+        pokeCooldownLen: CFG.poke.cooldownMs,
         pokeShowUntil: 0,
-        noContactStealUntil: 0,
+        shootPressedAt: -1e9,
+        catchArmedUntil: 0,
+        pickupAt: -1e9,
+        pickupCaught: false,
+        stumbleUntil: 0,
+        boostUntil: 0,
+        slowUntil: 0,
+        stats: emptyStats(),
       }));
     this.puck = {
-      x: rink.cx,
-      y: rink.cy,
+      x: this.R.cx,
+      y: this.R.cy,
       vx: 0,
       vy: 0,
       carrierId: null,
       lastReleasedBy: null,
       lastReleaseT: -1e9,
+      launchKind: 'other',
+      lastTouchId: null,
       protectedUntil: 0,
       launchId: 0,
+      goalieDelayMs: 0,
       ghostUntil: 0,
     };
     const mkGoalie = (team: Team): Goalie => ({
       team,
-      x: team === 'RED' ? G.redX : G.blueX,
-      y: rink.cy,
+      x: team === 'RED' ? this.R.minX + CFG.goalieOffset : this.R.maxX - CFG.goalieOffset,
+      y: this.R.cy,
       period: G.periodS * (1 - G.periodJitter / 2 + this.rand() * G.periodJitter),
       phase: this.rand() * Math.PI * 2,
       mode: 'PATROL',
@@ -219,12 +259,12 @@ export class HockeyMatch {
     p.carrierId = null;
     p.lastReleasedBy = null;
     p.ghostUntil = this.t + 200;
-    p.y = rink.cy;
+    p.y = this.R.cy;
     if (team === 'RED') {
-      p.x = rink.maxX - 6;
+      p.x = this.R.maxX - 6;
       p.vx = 600;
     } else {
-      p.x = rink.minX + 6;
+      p.x = this.R.minX + 6;
       p.vx = -600;
     }
     p.vy = 0;
@@ -295,29 +335,51 @@ export class HockeyMatch {
       score: [this.score.RED, this.score.BLUE],
       lastGoal: this.lastGoal,
       puck: [r1(this.puck.x), r1(this.puck.y), carrier ? carrier.number : 0],
-      sk: this.skaters.map((s) => ({
-        n: s.number,
-        tm: s.team === 'RED' ? 0 : 1,
-        x: r1(s.x),
-        y: r1(s.y),
-        fx: r2(s.fx),
-        fy: r2(s.fy),
-        ch: s.chargingSince === null ? -1 : r2(this.chargeFrac(s)),
-        ax: r2(s.aimX),
-        ay: r2(s.aimY),
-        c: s.connected ? 1 : 0,
-        pk: this.t < s.pokeShowUntil ? 1 : 0,
-      })),
+      sk: this.skaters.map((s) => {
+        const [ax, ay] = this.effectiveAim(s);
+        return {
+          n: s.number,
+          tm: s.team === 'RED' ? 0 : 1,
+          x: r1(s.x),
+          y: r1(s.y),
+          fx: r2(s.fx),
+          fy: r2(s.fy),
+          ch: s.chargingSince === null ? -1 : r2(Math.min(1.2, this.chargeRaw(s))),
+          ax: r2(ax),
+          ay: r2(ay),
+          c: s.connected ? 1 : 0,
+          pk: this.t < s.pokeShowUntil ? 1 : 0,
+          st: this.t < s.stumbleUntil ? 1 : 0,
+          bo: this.t < s.boostUntil ? 1 : 0,
+        };
+      }),
       gl: this.goalies.map((g) => ({ x: g.x, y: r1(g.y), s: this.t < g.saveFlashUntil ? 1 : 0 })) as [
         Snapshot['gl'][0],
         Snapshot['gl'][1],
       ],
+      rk: [this.R.minX, this.R.maxX, this.R.minY, this.R.maxY],
     };
   }
 
+  /** charge fraction 0..1 (clamped) */
   chargeFrac(s: Skater) {
+    return clamp(this.chargeRaw(s), 0, 1);
+  }
+
+  /** unclamped charge fraction (>1 means over-charged) */
+  chargeRaw(s: Skater) {
     if (s.chargingSince === null) return 0;
-    return clamp((this.t - s.chargingSince) / CFG.shot.chargeMs, 0, 1);
+    return Math.max(0, (this.t - s.chargingSince) / CFG.shot.chargeMs);
+  }
+
+  pokeReady(s: Skater) {
+    if (this.t >= s.pokeCooldownUntil) return 1;
+    return clamp(1 - (s.pokeCooldownUntil - this.t) / s.pokeCooldownLen, 0, 1);
+  }
+
+  /** True when a loose puck is about to reach this skater (phone shows a CATCH hint). */
+  catchHint(s: Skater) {
+    return this.incomingPuck(s);
   }
 
   drainEvents() {
@@ -329,36 +391,42 @@ export class HockeyMatch {
   // ---------------------------------------------------------------- phases
 
   faceoff() {
+    const R = this.R;
     for (const team of ['RED', 'BLUE'] as Team[]) {
       const members = this.skaters.filter((s) => s.team === team);
       const form = FORMATIONS[clamp(members.length, 1, 4)] ?? FORMATIONS[4];
       members.forEach((s, i) => {
         const [fx, fy] = form[i % form.length];
-        s.x = team === 'RED' ? fx : rink.width - fx;
-        s.y = fy;
+        const x = R.cx - (R.cx - fx) * R.sx;
+        s.x = team === 'RED' ? x : 2 * R.cx - x;
+        s.y = R.cy + (fy - R.cy) * R.sy;
         s.vx = s.vy = 0;
         s.fx = team === 'RED' ? 1 : -1;
         s.fy = 0;
         s.aimX = s.fx;
         s.aimY = 0;
         s.chargingSince = null;
-        s.noContactStealUntil = 0;
+        s.stumbleUntil = s.boostUntil = s.slowUntil = 0;
+        s.catchArmedUntil = 0;
       });
     }
     Object.assign(this.puck, {
-      x: rink.cx,
-      y: rink.cy,
+      x: R.cx,
+      y: R.cy,
       vx: 0,
       vy: 0,
       carrierId: null,
       lastReleasedBy: null,
       lastReleaseT: -1e9,
+      launchKind: 'other',
+      lastTouchId: null,
       protectedUntil: 0,
+      goalieDelayMs: 0,
       ghostUntil: 0,
     });
     this.puck.launchId++;
     for (const g of this.goalies) {
-      g.y = rink.cy;
+      g.y = R.cy;
       g.mode = 'PATROL';
       g.reactAt = null;
       g.targetY = null;
@@ -373,17 +441,37 @@ export class HockeyMatch {
   }
 
   private scoreGoal(team: Team) {
+    const p = this.puck;
     this.score[team]++;
     this.lastGoal = team;
     this.phase = 'GOAL_PAUSE';
     this.pauseMs = CFG.goalPauseMs;
-    this.puck.vx = this.puck.vy = 0;
-    this.puck.carrierId = null;
+    const scorer = p.lastTouchId ? this.getSkater(p.lastTouchId) : undefined;
+    const credited = scorer && scorer.team === team ? scorer : undefined;
+    if (credited) credited.stats.goals++;
+    this.events.push({
+      type: 'goal',
+      team,
+      scorer: credited ? credited.number : null,
+      goals: credited ? credited.stats.goals : 0,
+      x: p.x,
+      y: p.y,
+    });
+    p.vx = p.vy = 0;
+    p.carrierId = null;
     for (const s of this.skaters) s.chargingSince = null;
-    this.events.push({ type: 'goal', team });
   }
 
   // ---------------------------------------------------------------- skaters
+
+  private topSpeed(s: Skater) {
+    let v = SK.maxSpeed;
+    if (this.puck.carrierId === s.id) v *= SK.carrierSpeedFactor;
+    if (this.t < s.slowUntil) v *= CFG.contact.slowFactor;
+    if (this.t < s.stumbleUntil) v *= CFG.poke.stumbleSpeedFactor;
+    if (this.t < s.boostUntil) v *= CFG.catch.boostFactor;
+    return v;
+  }
 
   private updateSkaters(dt: number) {
     for (const s of this.skaters) {
@@ -403,8 +491,9 @@ export class HockeyMatch {
       const carrying = this.puck.carrierId === s.id;
 
       // SHOOT edges
-      if (inp.shoot && !s.prevShoot && carrying && s.chargingSince === null) {
-        this.startCharge(s, dirX, dirY, mag);
+      if (inp.shoot && !s.prevShoot) {
+        if (carrying && s.chargingSince === null) this.startCharge(s, dirX, dirY, mag);
+        else if (!carrying) s.shootPressedAt = this.t; // may become a one-timer
       }
       if (!inp.shoot && s.prevShoot && s.chargingSince !== null) {
         if (inp.cancel || !carrying) s.chargingSince = null;
@@ -415,7 +504,12 @@ export class HockeyMatch {
       // PASS / POKE edge
       if (inp.pass && !s.prevPass) {
         if (this.puck.carrierId === s.id) {
-          if (s.chargingSince === null) this.doPass(s, dirX, dirY, mag);
+          if (this.t - s.pickupAt <= CFG.catch.afterMs && !s.pickupCaught) {
+            // a slightly late POKE press right after receiving still counts as a clean catch
+            this.cleanCatch(s);
+          } else if (s.chargingSince === null) {
+            this.doPass(s, dirX, dirY, mag);
+          }
         } else {
           this.doPoke(s, dirX, dirY, mag);
         }
@@ -424,6 +518,7 @@ export class HockeyMatch {
       s.prevShoot = inp.shoot;
 
       // Movement
+      const top = this.topSpeed(s);
       if (s.chargingSince !== null) {
         if (mag > 0) {
           s.aimX = dirX;
@@ -431,8 +526,8 @@ export class HockeyMatch {
         }
         this.decel(s, SK.chargeDrag, dt);
       } else if (mag > 0) {
-        const tx = mx * SK.maxSpeed;
-        const ty = my * SK.maxSpeed;
+        const tx = mx * top;
+        const ty = my * top;
         let dvx = tx - s.vx;
         let dvy = ty - s.vy;
         const dl = Math.hypot(dvx, dvy);
@@ -451,10 +546,12 @@ export class HockeyMatch {
       } else {
         this.decel(s, SK.coastDecel, dt);
       }
+      // over the (possibly reduced) top speed: bleed off quickly but smoothly
       const sp = Math.hypot(s.vx, s.vy);
-      if (sp > SK.maxSpeed) {
-        s.vx *= SK.maxSpeed / sp;
-        s.vy *= SK.maxSpeed / sp;
+      if (sp > top) {
+        const ns = Math.max(top, sp - SK.overSpeedDecel * dt);
+        s.vx *= ns / sp;
+        s.vy *= ns / sp;
       }
       s.x += s.vx * dt;
       s.y += s.vy * dt;
@@ -472,26 +569,28 @@ export class HockeyMatch {
 
   private clampSkater(s: Skater) {
     const r = SK.radius;
-    if (s.x < rink.minX + r) {
-      s.x = rink.minX + r;
+    const R = this.R;
+    if (s.x < R.minX + r) {
+      s.x = R.minX + r;
       if (s.vx < 0) s.vx = 0;
-    } else if (s.x > rink.maxX - r) {
-      s.x = rink.maxX - r;
+    } else if (s.x > R.maxX - r) {
+      s.x = R.maxX - r;
       if (s.vx > 0) s.vx = 0;
     }
-    if (s.y < rink.minY + r) {
-      s.y = rink.minY + r;
+    if (s.y < R.minY + r) {
+      s.y = R.minY + r;
       if (s.vy < 0) s.vy = 0;
-    } else if (s.y > rink.maxY - r) {
-      s.y = rink.maxY - r;
+    } else if (s.y > R.maxY - r) {
+      s.y = R.maxY - r;
       if (s.vy > 0) s.vy = 0;
     }
   }
 
-  /** Gentle separation between skaters, and skaters vs (immovable) goalies. */
+  /** Separation between skaters (bodies block, no steals), and skaters vs (immovable) goalies. */
   private resolveBodies() {
     const r2 = SK.radius * 2;
     const list = this.skaters;
+    const carrierId = this.puck.carrierId;
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         const a = list[i];
@@ -499,6 +598,12 @@ export class HockeyMatch {
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let d = Math.hypot(dx, dy);
+        if (d >= r2 + 2) continue;
+        // opponent contact with the carrier slows the carrier down (but never steals)
+        if (a.team !== b.team) {
+          if (a.id === carrierId) a.slowUntil = this.t + CFG.contact.slowMs;
+          if (b.id === carrierId) b.slowUntil = this.t + CFG.contact.slowMs;
+        }
         if (d >= r2) continue;
         if (d < 1e-6) {
           dx = 1;
@@ -512,7 +617,6 @@ export class HockeyMatch {
         a.y -= ny * push;
         b.x += nx * push;
         b.y += ny * push;
-        // exchange a little of the closing velocity
         const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
         if (rel < 0) {
           const imp = rel * 0.5;
@@ -546,8 +650,20 @@ export class HockeyMatch {
   // ---------------------------------------------------------------- actions
 
   private opponentGoalDir(s: Skater): [number, number] {
-    const gx = s.team === 'RED' ? rink.maxX : rink.minX;
-    return norm(gx - s.x, rink.cy - s.y);
+    const gx = s.team === 'RED' ? this.R.maxX : this.R.minX;
+    return norm(gx - s.x, this.R.cy - s.y);
+  }
+
+  /** Aim including over-charge wobble. */
+  private effectiveAim(s: Skater): [number, number] {
+    if (s.chargingSince === null) return [s.aimX, s.aimY];
+    const over = this.t - s.chargingSince - CFG.shot.chargeMs;
+    if (over <= 0) return [s.aimX, s.aimY];
+    const amp = (CFG.shot.overchargeWobbleDeg * Math.min(1, over / CFG.shot.overchargeWobbleRampMs) * Math.PI) / 180;
+    const a = Math.sin(this.t / 90) * amp;
+    const c = Math.cos(a);
+    const sn = Math.sin(a);
+    return [s.aimX * c - s.aimY * sn, s.aimX * sn + s.aimY * c];
   }
 
   private startCharge(s: Skater, dirX: number, dirY: number, mag: number) {
@@ -568,13 +684,39 @@ export class HockeyMatch {
   }
 
   private fireShot(s: Skater) {
-    const frac = this.chargeFrac(s);
-    const speed = lerp(CFG.shot.minSpeed, CFG.shot.maxSpeed, frac);
+    const raw = this.chargeRaw(s);
+    const perfect = raw >= CFG.shot.perfectMin && raw <= CFG.shot.perfectMax;
+    const speed = perfect
+      ? CFG.shot.perfectSpeed
+      : lerp(CFG.shot.minSpeed, CFG.shot.maxSpeed, clamp(raw, 0, 1));
+    const [ax, ay] = this.effectiveAim(s);
     s.chargingSince = null;
-    this.release(s, s.aimX, s.aimY, speed, CFG.shot.momentumFactor);
-    s.fx = s.aimX;
-    s.fy = s.aimY;
-    this.events.push({ type: 'shot', playerId: s.id, speed });
+    this.release(s, ax, ay, speed, CFG.shot.momentumFactor, 'shot');
+    if (perfect) {
+      this.puck.goalieDelayMs = CFG.shot.perfectGoalieDelayMs;
+      s.stats.perfects++;
+    }
+    s.stats.shots++;
+    s.fx = ax;
+    s.fy = ay;
+    this.events.push({ type: 'shot', by: s.number, speed, perfect, oneTimer: false, x: s.x, y: s.y });
+  }
+
+  private fireOneTimer(s: Skater) {
+    const inp = s.input;
+    const mag = Math.hypot(inp.x, inp.y);
+    let [ax, ay] = mag >= CFG.deadZone ? norm(inp.x, inp.y) : this.opponentGoalDir(s);
+    // never one-time it into your own net by accident
+    const towardOwn = s.team === 'RED' ? ax < -0.3 : ax > 0.3;
+    if (towardOwn) [ax, ay] = this.opponentGoalDir(s);
+    this.release(s, ax, ay, CFG.oneTimer.speed, 0.1, 'shot');
+    this.puck.goalieDelayMs = CFG.oneTimer.goalieDelayMs;
+    s.prevShoot = true; // the held button is "used"; releasing it does nothing
+    s.stats.shots++;
+    s.stats.oneTimers++;
+    s.fx = ax;
+    s.fy = ay;
+    this.events.push({ type: 'shot', by: s.number, speed: CFG.oneTimer.speed, perfect: false, oneTimer: true, x: s.x, y: s.y });
   }
 
   private doPass(s: Skater, dirX: number, dirY: number, mag: number) {
@@ -604,37 +746,95 @@ export class HockeyMatch {
       [ax, ay] = norm(best.x + best.vx * lead - p.x, best.y + best.vy * lead - p.y);
     }
     s.passCooldownUntil = this.t + CFG.pass.cooldownMs;
-    this.release(s, ax, ay, CFG.pass.speed, 0.1);
+    this.release(s, ax, ay, CFG.pass.speed, 0.1, 'pass');
     s.fx = ax;
     s.fy = ay;
-    this.events.push({ type: 'pass', playerId: s.id, targetId: best ? best.id : null });
+    this.events.push({ type: 'pass', by: s.number, x: s.x, y: s.y });
+  }
+
+  /** Is a loose puck about to reach this skater? */
+  private incomingPuck(s: Skater) {
+    const p = this.puck;
+    if (p.carrierId) return false;
+    const dx = s.x - p.x;
+    const dy = s.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d > CFG.catch.incomingRange) return false;
+    const reach = SK.radius + PK.radius;
+    if (d <= reach + 6) return true;
+    const closing = (p.vx * dx + p.vy * dy) / d; // speed toward the skater
+    if (closing < 60) return false;
+    // will the puck's path pass within reach of us?
+    const sp = Math.hypot(p.vx, p.vy);
+    const cross = Math.abs(p.vx * dy - p.vy * dx) / sp;
+    return cross <= reach + 10 && ((d - reach) / closing) * 1000 <= CFG.catch.incomingTimeMs;
   }
 
   private doPoke(s: Skater, dirX: number, dirY: number, mag: number) {
     if (this.t < s.pokeCooldownUntil) return;
-    s.pokeCooldownUntil = this.t + CFG.poke.cooldownMs;
-    s.pokeShowUntil = this.t + CFG.poke.showMs;
+    const P = CFG.poke;
     const [ax, ay] = mag > 0 ? [dirX, dirY] : [s.fx, s.fy];
-    const reach = CFG.poke.range + SK.radius;
-    const inReach = (x: number, y: number) => {
-      const dx = x - s.x;
-      const dy = y - s.y;
-      return Math.hypot(dx, dy) <= reach && angleBetween(ax, ay, dx, dy) <= CFG.poke.arcDeg;
-    };
+    const reach = P.range + SK.radius;
+    const dist = (x: number, y: number) => Math.hypot(x - s.x, y - s.y);
+    const inReach = (x: number, y: number) => dist(x, y) <= reach && angleBetween(ax, ay, x - s.x, y - s.y) <= P.arcDeg;
     const p = this.puck;
+    const setCooldown = (ms: number) => {
+      s.pokeCooldownUntil = this.t + ms;
+      s.pokeCooldownLen = ms;
+    };
+
+    // 1) a loose puck is about to reach me → this press is a clean-catch attempt, never a whiff
+    if (!p.carrierId && this.incomingPuck(s)) {
+      s.catchArmedUntil = this.t + CFG.catch.beforeMs;
+      return;
+    }
+
+    s.pokeShowUntil = this.t + P.showMs;
     if (p.carrierId) {
       const c = this.getSkater(p.carrierId);
-      if (!c || c.team === s.team) return;
-      if ((inReach(p.x, p.y) || inReach(c.x, c.y)) && this.t >= p.protectedUntil) {
-        this.steal(s, c);
+      if (c && c.team !== s.team) {
+        if (inReach(p.x, p.y) || inReach(c.x, c.y)) {
+          setCooldown(P.cooldownMs);
+          if (this.t >= p.protectedUntil) this.steal(s, c);
+          return;
+        }
+        if (Math.min(dist(p.x, p.y), dist(c.x, c.y)) <= reach * P.closeMissFactor) {
+          setCooldown(P.cooldownMs); // close miss: no stumble
+          return;
+        }
+      } else if (c) {
+        setCooldown(P.cooldownMs); // poking near your own carrier: harmless
+        return;
       }
     } else if (inReach(p.x, p.y)) {
-      p.vx = ax * CFG.poke.nudgeSpeed;
-      p.vy = ay * CFG.poke.nudgeSpeed;
+      setCooldown(P.cooldownMs);
+      p.vx = ax * P.nudgeSpeed;
+      p.vy = ay * P.nudgeSpeed;
+      return;
+    } else if (dist(p.x, p.y) <= reach * P.closeMissFactor) {
+      setCooldown(P.cooldownMs);
+      return;
     }
+    // whiff: nothing to poke at — stumble and wait longer
+    setCooldown(P.whiffCooldownMs);
+    s.stumbleUntil = this.t + P.stumbleMs;
+    this.events.push({ type: 'whiff', by: s.number, x: s.x, y: s.y });
   }
 
-  private release(s: Skater, dx: number, dy: number, speed: number, momentum: number) {
+  private cleanCatch(s: Skater) {
+    s.pickupCaught = true;
+    s.catchArmedUntil = 0;
+    s.boostUntil = this.t + CFG.catch.boostMs;
+    const sp = Math.hypot(s.vx, s.vy);
+    const [dx, dy] = sp > 20 ? [s.vx / sp, s.vy / sp] : [s.fx, s.fy];
+    const target = Math.max(sp, SK.maxSpeed * 0.75) * 1.15;
+    s.vx = dx * target;
+    s.vy = dy * target;
+    s.stats.catches++;
+    this.events.push({ type: 'cleanCatch', by: s.number, x: s.x, y: s.y });
+  }
+
+  private release(s: Skater, dx: number, dy: number, speed: number, momentum: number, kind: Puck['launchKind']) {
     const p = this.puck;
     p.carrierId = null;
     p.vx = dx * speed + s.vx * momentum;
@@ -646,6 +846,8 @@ export class HockeyMatch {
     }
     p.lastReleasedBy = s.id;
     p.lastReleaseT = this.t;
+    p.launchKind = kind;
+    p.goalieDelayMs = 0;
     p.launchId++;
   }
 
@@ -656,55 +858,69 @@ export class HockeyMatch {
     p.vy = s.vy * 0.5;
     p.lastReleasedBy = s.id;
     p.lastReleaseT = this.t;
+    p.launchKind = 'other';
+    p.goalieDelayMs = 0;
     p.launchId++;
   }
 
   private steal(thief: Skater, victim: Skater) {
     victim.chargingSince = null;
-    victim.noContactStealUntil = this.t + CFG.contactStealCooldownMs;
-    this.giveTo(thief, true);
+    victim.slowUntil = this.t + CFG.stealVictimSlowMs;
+    thief.stats.steals++;
+    this.events.push({ type: 'steal', by: thief.number, from: victim.number, x: this.puck.x, y: this.puck.y });
+    this.giveTo(thief);
+    this.puck.protectedUntil = this.t + CFG.stealImmunityMs;
   }
 
-  private giveTo(s: Skater, steal: boolean) {
+  /** Possession change. Returns true if the puck was immediately shot as a one-timer. */
+  private giveTo(s: Skater) {
     const p = this.puck;
+    const fromTeammatePass =
+      p.carrierId === null &&
+      p.launchKind === 'pass' &&
+      p.lastReleasedBy !== null &&
+      p.lastReleasedBy !== s.id &&
+      this.getSkater(p.lastReleasedBy)?.team === s.team;
     p.carrierId = s.id;
+    p.lastTouchId = s.id;
     p.protectedUntil = this.t + CFG.pickupImmunityMs;
     p.vx = p.vy = 0;
-    this.events.push({ type: 'possession', playerId: s.id, steal });
+    s.pickupAt = this.t;
+    s.pickupCaught = false;
+    if (fromTeammatePass && s.input.shoot && s.chargingSince === null && this.t - s.shootPressedAt <= CFG.oneTimer.windowMs) {
+      this.positionCarried(s);
+      this.fireOneTimer(s);
+      return true;
+    }
+    if (this.t <= s.catchArmedUntil) this.cleanCatch(s);
+    return false;
   }
 
   // ---------------------------------------------------------------- puck
 
+  private positionCarried(owner: Skater) {
+    const p = this.puck;
+    const [dx, dy] = owner.chargingSince !== null ? this.effectiveAim(owner) : [owner.fx, owner.fy];
+    p.x = clamp(owner.x + dx * PK.carryDist, this.R.minX + PK.radius, this.R.maxX - PK.radius);
+    p.y = clamp(owner.y + dy * PK.carryDist, this.R.minY + PK.radius, this.R.maxY - PK.radius);
+  }
+
   private updateCarried() {
     const p = this.puck;
     if (!p.carrierId) return;
-    const c = this.getSkater(p.carrierId);
-    if (!c) {
+    const owner = this.getSkater(p.carrierId);
+    if (!owner) {
       p.carrierId = null;
       return;
     }
-    // contact steals by opponents
-    if (this.t >= p.protectedUntil) {
-      for (const s of this.skaters) {
-        if (s.team === c.team || this.t < s.noContactStealUntil) continue;
-        const touchBody = Math.hypot(s.x - c.x, s.y - c.y) < SK.radius * 2 + 2;
-        const touchPuck = Math.hypot(s.x - p.x, s.y - p.y) < SK.radius + PK.radius;
-        if (touchBody || touchPuck) {
-          this.steal(s, c);
-          break;
-        }
-      }
-    }
-    const owner = this.getSkater(p.carrierId!)!;
-    const [dx, dy] = owner.chargingSince !== null ? [owner.aimX, owner.aimY] : [owner.fx, owner.fy];
-    p.x = clamp(owner.x + dx * PK.carryDist, rink.minX + PK.radius, rink.maxX - PK.radius);
-    p.y = clamp(owner.y + dy * PK.carryDist, rink.minY + PK.radius, rink.maxY - PK.radius);
+    this.positionCarried(owner);
     p.vx = owner.vx;
     p.vy = owner.vy;
   }
 
   private updateLoosePuck(dt: number) {
     const p = this.puck;
+    const R = this.R;
     let sp = Math.hypot(p.vx, p.vy);
     if (sp > 0) {
       const ns = Math.max(0, sp - PK.friction * dt);
@@ -720,38 +936,36 @@ export class HockeyMatch {
       p.y += p.vy * sdt;
 
       const inMouth = p.y > goal.minY && p.y < goal.maxY;
-      const pastLeft = p.x - pr < rink.minX;
-      const pastRight = p.x + pr > rink.maxX;
+      const pastLeft = p.x - pr < R.minX;
+      const pastRight = p.x + pr > R.maxX;
       if ((pastLeft || pastRight) && inMouth) {
-        // entering a goal mouth: keep inside the net's vertical extent
         p.y = clamp(p.y, goal.minY + pr, goal.maxY - pr);
-        if (pastLeft && p.x + pr < rink.minX) return this.scoreGoal('BLUE');
-        if (pastRight && p.x - pr > rink.maxX) return this.scoreGoal('RED');
-        // back of net
-        if (p.x < rink.minX - goal.depth + pr) {
-          p.x = rink.minX - goal.depth + pr;
+        if (pastLeft && p.x + pr < R.minX) return this.scoreGoal('BLUE');
+        if (pastRight && p.x - pr > R.maxX) return this.scoreGoal('RED');
+        if (p.x < R.minX - goal.depth + pr) {
+          p.x = R.minX - goal.depth + pr;
           p.vx = Math.abs(p.vx) * 0.3;
-        } else if (p.x > rink.maxX + goal.depth - pr) {
-          p.x = rink.maxX + goal.depth - pr;
+        } else if (p.x > R.maxX + goal.depth - pr) {
+          p.x = R.maxX + goal.depth - pr;
           p.vx = -Math.abs(p.vx) * 0.3;
         }
       } else {
         if (pastLeft) {
-          p.x = rink.minX + pr;
+          p.x = R.minX + pr;
           p.vx = Math.abs(p.vx) * PK.wallRestitution;
           p.vy *= PK.wallTangentDamping;
         } else if (pastRight) {
-          p.x = rink.maxX - pr;
+          p.x = R.maxX - pr;
           p.vx = -Math.abs(p.vx) * PK.wallRestitution;
           p.vy *= PK.wallTangentDamping;
         }
       }
-      if (p.y - pr < rink.minY) {
-        p.y = rink.minY + pr;
+      if (p.y - pr < R.minY) {
+        p.y = R.minY + pr;
         p.vy = Math.abs(p.vy) * PK.wallRestitution;
         p.vx *= PK.wallTangentDamping;
-      } else if (p.y + pr > rink.maxY) {
-        p.y = rink.maxY - pr;
+      } else if (p.y + pr > R.maxY) {
+        p.y = R.maxY - pr;
         p.vy = -Math.abs(p.vy) * PK.wallRestitution;
         p.vx *= PK.wallTangentDamping;
       }
@@ -777,13 +991,15 @@ export class HockeyMatch {
         p.y = g.y + ny * (rr + 0.5);
         if (Math.sign(p.x - g.x) !== out) p.x = g.x + out * (rr + 0.5);
         p.lastReleasedBy = null;
+        p.launchKind = 'other';
+        p.goalieDelayMs = 0;
         p.launchId++;
         g.saveCooldownUntil = this.t + G.saveCooldownMs;
         g.saveFlashUntil = this.t + G.saveFlashMs;
-        this.events.push({ type: 'save', team: g.team });
+        this.events.push({ type: 'save', team: g.team, x: p.x, y: p.y });
       }
 
-      // pickups (any skater touching a loose puck takes it, however fast)
+      // pickups: any skater touching a loose puck takes it, however fast
       if (this.t >= p.ghostUntil) {
         let best: Skater | null = null;
         let bestD = SK.radius + pr;
@@ -796,7 +1012,8 @@ export class HockeyMatch {
           }
         }
         if (best) {
-          this.giveTo(best, false);
+          this.events.push({ type: 'pickup', by: best.number, x: p.x, y: p.y });
+          this.giveTo(best);
           return;
         }
       }
@@ -807,12 +1024,13 @@ export class HockeyMatch {
 
   private updateGoalies(dt: number) {
     const p = this.puck;
+    const R = this.R;
     const tSec = this.t / 1000;
     for (const g of this.goalies) {
-      const own = g.team === 'RED' ? -1 : 1; // direction toward own goal along x
-      const lineX = g.team === 'RED' ? rink.minX : rink.maxX;
-      let patrolY = rink.cy + G.patrolAmp * Math.sin((2 * Math.PI * tSec) / g.period + g.phase);
-      const inOwnHalf = g.team === 'RED' ? p.x < rink.cx : p.x > rink.cx;
+      const own = g.team === 'RED' ? -1 : 1;
+      const lineX = g.team === 'RED' ? R.minX : R.maxX;
+      let patrolY = R.cy + G.patrolAmp * Math.sin((2 * Math.PI * tSec) / g.period + g.phase);
+      const inOwnHalf = g.team === 'RED' ? p.x < R.cx : p.x > R.cx;
       if (inOwnHalf) patrolY = lerp(patrolY, p.y, G.patrolTrack);
 
       let target = patrolY;
@@ -824,7 +1042,10 @@ export class HockeyMatch {
         if (g.trackLaunch !== p.launchId) {
           g.trackLaunch = p.launchId;
           g.reactAt =
-            this.t + G.reactDelayMinMs + this.rand() * (G.reactDelayMaxMs - G.reactDelayMinMs);
+            this.t +
+            G.reactDelayMinMs +
+            this.rand() * (G.reactDelayMaxMs - G.reactDelayMinMs) +
+            p.goalieDelayMs;
           g.targetY = null;
         }
         if (g.reactAt !== null && this.t >= g.reactAt) {
@@ -851,12 +1072,12 @@ export class HockeyMatch {
   private sanitize() {
     const p = this.puck;
     if (!finite(p.x, p.y, p.vx, p.vy)) {
-      Object.assign(p, { x: rink.cx, y: rink.cy, vx: 0, vy: 0, carrierId: null });
+      Object.assign(p, { x: this.R.cx, y: this.R.cy, vx: 0, vy: 0, carrierId: null });
     }
     for (const s of this.skaters) {
       if (!finite(s.x, s.y, s.vx, s.vy, s.fx, s.fy)) {
-        s.x = s.team === 'RED' ? 400 : 800;
-        s.y = rink.cy;
+        s.x = s.team === 'RED' ? this.R.cx - 150 : this.R.cx + 150;
+        s.y = this.R.cy;
         s.vx = s.vy = 0;
         s.fx = s.team === 'RED' ? 1 : -1;
         s.fy = 0;

@@ -11,6 +11,7 @@ import {
   type InputMsg,
   type MatchResult,
   type Phase,
+  type PlayerStat,
   type PublicPlayer,
   type RoomState,
   type Team,
@@ -403,7 +404,7 @@ export class Room {
       if (!pl.testPlayer || !pl.inMatch) continue;
       const s = m.getSkater(pl.id);
       if (!s) continue;
-      const goalX = s.team === 'RED' ? CFG.rink.maxX : CFG.rink.minX;
+      const goalX = s.team === 'RED' ? m.R.maxX : m.R.minX;
       const carrier = p.carrierId ? m.getSkater(p.carrierId) : undefined;
       let tx = p.x;
       let ty = p.y;
@@ -411,7 +412,7 @@ export class Room {
       let pass = false;
       if (carrier?.id === s.id) {
         tx = goalX;
-        ty = CFG.rink.cy + Math.sin(this.botTick / 40 + s.number) * 50;
+        ty = m.R.cy + Math.sin(this.botTick / 40 + s.number) * 50;
         const dist = Math.abs(goalX - s.x);
         // hold shoot for a short charge, then release
         const phaseT = (this.botTick + s.number * 7) % 40;
@@ -419,9 +420,9 @@ export class Room {
       } else if (carrier && carrier.team === s.team) {
         // spread out ahead of the teammate
         tx = carrier.x + (s.team === 'RED' ? 160 : -160);
-        ty = carrier.y > CFG.rink.cy ? 200 : 480;
+        ty = carrier.y > m.R.cy ? m.R.cy - 140 * m.R.sy : m.R.cy + 140 * m.R.sy;
       } else if (carrier) {
-        pass = Math.hypot(carrier.x - s.x, carrier.y - s.y) < 70 && (this.botTick + s.number) % 30 === 0;
+        pass = Math.hypot(carrier.x - s.x, carrier.y - s.y) < 70 && (this.botTick + s.number * 13) % 50 === 0;
       }
       const dx = tx - s.x;
       const dy = ty - s.y;
@@ -522,10 +523,21 @@ export class Room {
       this.driveTestPlayers(m);
       m.step();
       if (m.phase === 'OVER') {
+        const stats: PlayerStat[] = m.skaters.map((s) => ({
+          number: s.number,
+          name: this.getPlayer(s.id)?.name ?? `P${s.number}`,
+          team: s.team,
+          ...s.stats,
+        }));
+        const mvpScore = (p: PlayerStat) =>
+          p.goals * 5 + p.steals * 2 + p.oneTimers * 2 + p.catches + p.perfects + p.shots * 0.5;
+        const best = [...stats].sort((a, b) => mvpScore(b) - mvpScore(a))[0];
         this.result = {
           red: m.score.RED,
           blue: m.score.BLUE,
           winner: m.score.RED > m.score.BLUE ? 'RED' : m.score.BLUE > m.score.RED ? 'BLUE' : 'DRAW',
+          stats,
+          mvp: best && mvpScore(best) > 0 ? best.number : null,
         };
         this.stage = 'RESULTS';
         this.dirty = true;

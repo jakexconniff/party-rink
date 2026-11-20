@@ -412,6 +412,19 @@ function PhaseView({
             <span className="red-t">{r?.red ?? 0}</span> – <span className="blue-t">{r?.blue ?? 0}</span>
           </p>
           {self.team && r && r.winner === self.team ? <p>🎉 Your team won!</p> : null}
+          {(() => {
+            const mine = r?.stats.find((p) => p.number === self.number);
+            if (!mine) return null;
+            return (
+              <div className="card">
+                {r?.mvp === self.number ? <b style={{ color: '#ffd23f' }}>⭐ You're the MVP!</b> : null}
+                <p>
+                  You: {mine.goals} goals · {mine.shots} shots · {mine.steals} steals · {mine.oneTimers} one-timers ·{' '}
+                  {mine.perfects} perfect · {mine.catches} clean catches
+                </p>
+              </div>
+            );
+          })()}
           <div className="spacer" />
           {isHost ? (
             <>

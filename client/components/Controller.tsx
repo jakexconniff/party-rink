@@ -127,7 +127,7 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
     }
     let raf = 0;
     const loop = () => {
-      setCharge(Math.min(1, (performance.now() - shootStart.current) / CHARGE_MS));
+      setCharge((performance.now() - shootStart.current) / CHARGE_MS);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -214,6 +214,33 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
 
   const hasPuck = !!cs?.hasPuck;
   const phase = cs?.phase;
+
+  // Haptics (Android; iOS Safari ignores vibrate) — purely a nicety.
+  const prev = useRef<{ hasPuck: boolean; score: [number, number]; stumbling: boolean } | null>(null);
+  useEffect(() => {
+    if (!cs) return;
+    const buzz = (p: number | number[]) => {
+      try {
+        navigator.vibrate?.(p);
+      } catch {
+        /* unsupported */
+      }
+    };
+    const p = prev.current;
+    if (p) {
+      if (cs.hasPuck && !p.hasPuck) buzz(35);
+      if (cs.stumbling && !p.stumbling) buzz(90);
+      const mine = team === 'RED' ? 0 : 1;
+      if (cs.score[mine] > p.score[mine]) buzz([120, 60, 120, 60, 220]);
+    }
+    prev.current = { hasPuck: cs.hasPuck, score: cs.score, stumbling: cs.stumbling };
+  }, [cs, team]);
+
+  const charging = shootDown && (hasPuck || !!cs?.charging);
+  const perfectZone = charge >= 0.8 && charge <= 0.95;
+  const pokeCooldown = !hasPuck && cs ? 1 - cs.pokeReady : 0;
+  const catchHint = !hasPuck && !!cs?.catchHint;
+  const status = cs?.stumbling ? 'Whiff! 💫' : cs?.boosting ? 'BOOST! ⚡' : catchHint ? 'Tap POKE to catch!' : '';
   const banner =
     phase === 'COUNTDOWN' ? 'Get ready…' : phase === 'GOAL_PAUSE' ? 'GOAL!' : !connected ? 'Reconnecting…' : null;
 
@@ -253,14 +280,17 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
         </div>
         <div className="btn-zone">
           <button
-            className={`act ${hasPuck ? 'pass' : 'poke'} ${passDown ? 'down' : ''}`}
+            className={`act ${hasPuck ? 'pass' : 'poke'} ${passDown ? 'down' : ''} ${catchHint ? 'catch-hint' : ''}`}
             onPointerDown={btnDown('pass')}
             onPointerUp={btnUp('pass', false)}
             onPointerCancel={btnUp('pass', true)}
             onLostPointerCapture={btnUp('pass', true)}
           >
+            {pokeCooldown > 0.02 ? (
+              <div className="poke-cool" style={{ transform: `scaleY(${pokeCooldown})` }} />
+            ) : null}
             <span>{hasPuck ? 'PASS' : 'POKE'}</span>
-            <small>{hasPuck ? 'to teammate' : 'steal puck'}</small>
+            <small>{hasPuck ? 'to teammate' : catchHint ? 'tap to catch!' : 'steal puck'}</small>
           </button>
           <button
             className={`act shoot ${hasPuck || cs?.charging ? '' : 'inactive'} ${shootDown ? 'down' : ''}`}
@@ -269,15 +299,34 @@ export function Controller({ socket, cs, team, name, number, connected }: Props)
             onPointerCancel={btnUp('shoot', true)}
             onLostPointerCapture={btnUp('shoot', true)}
           >
-            {shootDown && (hasPuck || cs?.charging) ? (
-              <div className="charge-fill" style={{ height: `${Math.round(charge * 100)}%` }} />
+            {charging ? (
+              <>
+                <div className="sweet-spot" />
+                <div
+                  className={`charge-fill ${perfectZone ? 'perfect' : charge > 1 ? 'over' : ''}`}
+                  style={{ height: `${Math.round(Math.min(1, charge) * 100)}%` }}
+                />
+              </>
             ) : null}
-            <span>SHOOT</span>
-            <small>{shootDown && (hasPuck || cs?.charging) ? 'aim with stick · release!' : 'tap or hold to charge'}</small>
+            <span>{charging && perfectZone ? 'NOW!' : 'SHOOT'}</span>
+            <small>
+              {charging
+                ? charge > 1
+                  ? 'too long — aim wobbles!'
+                  : 'release in the green'
+                : hasPuck
+                  ? 'tap or hold to charge'
+                  : 'hold for one-timer'}
+            </small>
           </button>
         </div>
       </div>
       {banner ? <div className="ctl-banner">{banner}</div> : null}
+      {status && !banner ? (
+        <div className="ctl-status" style={{ color: cs?.stumbling ? '#ffb020' : '#50e6ff' }}>
+          {status}
+        </div>
+      ) : null}
     </div>
   );
 }

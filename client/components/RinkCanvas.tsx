@@ -3,7 +3,8 @@ import type { Snapshot, SkaterSnap } from '../../shared/types';
 
 // World constants (mirror server/simulation/config.ts; rendering only).
 const W = 1200;
-const RINK = { minX: 64, maxX: 1136, minY: 48, maxY: 632 };
+/** current rink bounds; updated from each snapshot's `rk` */
+let RINK = { minX: 64, maxX: 1136, minY: 48, maxY: 632 };
 const GOAL = { minY: 276, maxY: 404, depth: 34 };
 const SK_R = 16;
 const PUCK_R = 9;
@@ -25,9 +26,25 @@ export interface SnapBuffer {
   items: { snap: Snapshot; at: number }[];
 }
 
+export interface Callout {
+  text: string;
+  color: string;
+  x: number;
+  y: number;
+  born: number;
+  big?: boolean;
+}
+
+/** Visual effects fed by match events (see Tv.tsx). */
+export interface FxState {
+  callouts: Callout[];
+  shakeUntil: number;
+}
+
 interface Props {
   buffer: React.MutableRefObject<SnapBuffer>;
   roster: React.MutableRefObject<RosterInfo>;
+  fx: React.MutableRefObject<FxState>;
 }
 
 const INTERP_DELAY = 70;
@@ -62,7 +79,7 @@ function interpolated(buf: SnapBuffer, now: number): Snapshot | null {
   return { ...sb, sk, puck, gl };
 }
 
-export function RinkCanvas({ buffer, roster }: Props) {
+export function RinkCanvas({ buffer, roster, fx }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -71,6 +88,7 @@ export function RinkCanvas({ buffer, roster }: Props) {
     let raf = 0;
     let lastCarrier = 0;
     let flashUntil = 0;
+    const trail: { x: number; y: number }[] = [];
 
     const draw = () => {
       raf = requestAnimationFrame(draw);
@@ -85,16 +103,31 @@ export function RinkCanvas({ buffer, roster }: Props) {
       const now = performance.now();
       const snap = interpolated(buffer.current, now);
 
-      // projection
-      const worldH = 680;
-      const k = Math.min(cw / (W * 0.98), ch / (worldH * SQUASH + 70));
+      // rink bounds for this match (smaller games use a smaller rink)
+      if (snap?.rk) RINK = { minX: snap.rk[0], maxX: snap.rk[1], minY: snap.rk[2], maxY: snap.rk[3] };
+      const CX = W / 2;
+      const CY = (RINK.minY + RINK.maxY) / 2;
+      const sxs = (RINK.maxX - CX) / (1136 - CX); // x scale vs full rink
+      const sys = (RINK.maxY - CY) / (632 - 340);
+
+      // projection: fit this rink (plus goals and labels) to the canvas
+      const spanX = RINK.maxX - RINK.minX + 2 * GOAL.depth + 60;
+      const top0 = RINK.minY - 40;
+      const spanY = RINK.maxY + 60 - top0;
+      const k = Math.min(cw / spanX, ch / (spanY * SQUASH + 30));
       const ox = cw / 2;
-      const oy = (ch - worldH * SQUASH * k) / 2 + 20 * k;
-      const sc = (y: number) => lerp(PERSP_FAR, 1, y / worldH);
-      const P = (x: number, y: number): [number, number] => [ox + (x - W / 2) * k * sc(y), oy + y * k * SQUASH];
+      const oy = (ch - spanY * SQUASH * k) / 2;
+      const sc = (y: number) => lerp(PERSP_FAR, 1, (y - RINK.minY) / (RINK.maxY - RINK.minY));
+      const P = (x: number, y: number): [number, number] => [ox + (x - CX) * k * sc(y), oy + (y - top0) * k * SQUASH];
       const S = (y: number) => k * sc(y); // size scale at depth y
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cw, ch);
+      // screen shake (goals)
+      if (now < fx.current.shakeUntil) {
+        const m = ((fx.current.shakeUntil - now) / 500) * 10 * k;
+        ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+      }
 
       // ---- rink
       const rr = (x0: number, y0: number, x1: number, y1: number, r: number) => {
@@ -141,7 +174,7 @@ export function RinkCanvas({ buffer, roster }: Props) {
       ctx.save();
       ctx.clip();
       // ice shine
-      const [sx0, sy0] = P(300, 120);
+      const [sx0, sy0] = P(CX - 300 * sxs, CY - 220 * sys);
       const shine = ctx.createRadialGradient(sx0, sy0, 0, sx0, sy0, 500 * k);
       shine.addColorStop(0, 'rgba(255,255,255,0.7)');
       shine.addColorStop(1, 'rgba(255,255,255,0)');
@@ -172,11 +205,13 @@ export function RinkCanvas({ buffer, roster }: Props) {
         ctx.lineTo(...d);
         ctx.fill();
       };
-      zone(0, 400, 'rgba(239,59,74,0.07)');
-      zone(800, W, 'rgba(47,134,255,0.08)');
-      line(600, 'rgba(220,30,50,0.75)', 6);
-      line(400, 'rgba(30,100,230,0.7)', 6);
-      line(800, 'rgba(30,100,230,0.7)', 6);
+      const blueL = CX - 200 * sxs;
+      const blueR = CX + 200 * sxs;
+      zone(0, blueL, 'rgba(239,59,74,0.07)');
+      zone(blueR, W, 'rgba(47,134,255,0.08)');
+      line(CX, 'rgba(220,30,50,0.75)', 6);
+      line(blueL, 'rgba(30,100,230,0.7)', 6);
+      line(blueR, 'rgba(30,100,230,0.7)', 6);
       line(RINK.minX + 2, 'rgba(220,30,50,0.6)', 2.5);
       line(RINK.maxX - 2, 'rgba(220,30,50,0.6)', 2.5);
       const ellipse = (x: number, y: number, r: number, stroke: string | null, fill: string | null, lw = 3) => {
@@ -193,15 +228,19 @@ export function RinkCanvas({ buffer, roster }: Props) {
           ctx.stroke();
         }
       };
-      ellipse(600, 340, 80, 'rgba(30,100,230,0.6)', null);
-      ellipse(600, 340, 6, null, 'rgba(30,100,230,0.8)');
-      for (const [fx, fy] of [
-        [230, 180],
-        [230, 500],
-        [970, 180],
-        [970, 500],
-      ])
-        ellipse(fx, fy, 50, 'rgba(220,30,50,0.45)', null), ellipse(fx, fy, 6, null, 'rgba(220,30,50,0.7)');
+      ellipse(CX, CY, 80 * Math.min(1, sys), 'rgba(30,100,230,0.6)', null);
+      ellipse(CX, CY, 6, null, 'rgba(30,100,230,0.8)');
+      for (const [dx, dy] of [
+        [-370, -160],
+        [-370, 160],
+        [370, -160],
+        [370, 160],
+      ]) {
+        const fxp = CX + dx * sxs;
+        const fyp = CY + dy * sys;
+        ellipse(fxp, fyp, 50 * Math.min(1, sys), 'rgba(220,30,50,0.45)', null);
+        ellipse(fxp, fyp, 6, null, 'rgba(220,30,50,0.7)');
+      }
       // goal creases
       for (const left of [true, false]) {
         const x0 = left ? RINK.minX : RINK.maxX;
@@ -222,7 +261,7 @@ export function RinkCanvas({ buffer, roster }: Props) {
       ctx.font = `900 ${60 * k}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const [lx, ly] = P(600, 340);
+      const [lx, ly] = P(CX, CY);
       ctx.fillText('PARTY RINK', lx, ly);
       ctx.restore();
 
@@ -287,10 +326,10 @@ export function RinkCanvas({ buffer, roster }: Props) {
       ctx.font = `800 ${20 * k}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = COLORS.red;
-      const [rlx, rly] = P(210, RINK.maxY + 34);
+      const [rlx, rly] = P(RINK.minX + 150, RINK.maxY + 34);
       ctx.fillText('◀ RED DEFENDS', rlx, rly);
       ctx.fillStyle = COLORS.blue;
-      const [blx, bly] = P(990, RINK.maxY + 34);
+      const [blx, bly] = P(RINK.maxX - 150, RINK.maxY + 34);
       ctx.fillText('BLUE DEFENDS ▶', blx, bly);
 
       if (!snap) return;
@@ -332,13 +371,35 @@ export function RinkCanvas({ buffer, roster }: Props) {
               ctx.ellipse(px, py, 24 * z * pulse, 24 * z * SQUASH * pulse, 0, 0, Math.PI * 2);
               ctx.stroke();
             }
+            // speed boost after a clean catch: cyan glow + speed streaks
+            if (s.bo) {
+              ctx.strokeStyle = 'rgba(80,230,255,0.8)';
+              ctx.lineWidth = 3 * k;
+              ctx.beginPath();
+              ctx.ellipse(px, py, 28 * z, 28 * z * SQUASH, 0, 0, Math.PI * 2);
+              ctx.stroke();
+              for (let i = -1; i <= 1; i++) {
+                const [bx, by] = P(s.x - s.fx * 30 + s.fy * i * 9, s.y - s.fy * 30 - s.fx * i * 9);
+                const [cx2, cy2] = P(s.x - s.fx * 60 + s.fy * i * 9, s.y - s.fy * 60 - s.fx * i * 9);
+                ctx.beginPath();
+                ctx.moveTo(bx, by - 10 * z);
+                ctx.lineTo(cx2, cy2 - 10 * z);
+                ctx.stroke();
+              }
+            }
             shadow(s.x, s.y, 17);
-            // charge / aim arrow on the ice
+            // charge / aim arrow on the ice — turns green in the PERFECT window, red when over-charged
             if (s.ch >= 0) {
-              const len = 50 + 110 * s.ch;
+              const c = Math.min(1, s.ch);
+              const len = 50 + 110 * c;
               const [ex, ey] = P(s.x + s.ax * len, s.y + s.ay * len);
-              ctx.strokeStyle = `rgba(255,${Math.round(200 - 170 * s.ch)},0,0.95)`;
-              ctx.lineWidth = (5 + 5 * s.ch) * k;
+              const perfect = s.ch >= 0.8 && s.ch <= 0.95;
+              ctx.strokeStyle = perfect
+                ? 'rgba(60,255,140,1)'
+                : s.ch > 1
+                  ? 'rgba(255,40,40,0.95)'
+                  : `rgba(255,${Math.round(210 - 120 * c)},0,0.95)`;
+              ctx.lineWidth = (5 + 5 * c + (perfect ? 3 : 0)) * k;
               ctx.lineCap = 'round';
               ctx.beginPath();
               ctx.moveTo(px, py);
@@ -421,6 +482,15 @@ export function RinkCanvas({ buffer, roster }: Props) {
               ctx.font = `900 ${13 * z}px system-ui, sans-serif`;
               ctx.fillText('AWAY', px, ly2 - 20 * z);
             }
+            // stumbling after a whiffed poke: dizzy stars circling the head
+            if (s.st) {
+              ctx.fillStyle = '#ffd23f';
+              ctx.font = `900 ${12 * z}px system-ui, sans-serif`;
+              for (let i = 0; i < 3; i++) {
+                const a = now / 150 + (i * Math.PI * 2) / 3;
+                ctx.fillText('★', px + Math.cos(a) * 14 * z, hyc - 4 * z + Math.sin(a) * 5 * z);
+              }
+            }
             ctx.globalAlpha = 1;
           },
         });
@@ -490,6 +560,28 @@ export function RinkCanvas({ buffer, roster }: Props) {
       });
 
       const [pxw, pyw] = snap.puck;
+      // puck trail for fast, loose pucks (shots and passes)
+      const lastT = trail[trail.length - 1];
+      if (!lastT || Math.hypot(lastT.x - pxw, lastT.y - pyw) > 0.5) trail.push({ x: pxw, y: pyw });
+      if (trail.length > 9) trail.shift();
+      if (!snap.puck[2] && trail.length > 2) {
+        const a = trail[0];
+        const speedish = Math.hypot(pxw - a.x, pyw - a.y) / trail.length;
+        if (speedish > 6 && speedish < 60) {
+          for (let i = 1; i < trail.length; i++) {
+            const [x0, y0] = P(trail[i - 1].x, trail[i - 1].y);
+            const [x1, y1] = P(trail[i].x, trail[i].y);
+            ctx.strokeStyle = `rgba(255,${speedish > 12 ? 120 : 200},40,${(i / trail.length) * 0.7})`;
+            ctx.lineWidth = (2 + (i / trail.length) * 7) * k;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.stroke();
+          }
+          ctx.lineCap = 'butt';
+        }
+      }
       ents.push({
         y: pyw + 0.5,
         draw: () => {
@@ -519,12 +611,33 @@ export function RinkCanvas({ buffer, roster }: Props) {
 
       ents.sort((a, b) => a.y - b.y);
       for (const e of ents) e.draw();
+
+      // floating callouts (STOLEN!, PERFECT!, ONE-TIMER!, CLEAN!, whiff)
+      const LIFE = 1100;
+      fx.current.callouts = fx.current.callouts.filter((c) => now - c.born < LIFE);
+      for (const c of fx.current.callouts) {
+        const age = (now - c.born) / LIFE;
+        const [cx2, cy2] = P(c.x, c.y);
+        const rise = age * 50 * k;
+        const pop = age < 0.15 ? 0.6 + (age / 0.15) * 0.4 : 1;
+        const size = (c.big ? 34 : 22) * k * pop;
+        ctx.globalAlpha = age > 0.7 ? 1 - (age - 0.7) / 0.3 : 1;
+        ctx.font = `900 ${size}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 5 * k;
+        ctx.strokeStyle = 'rgba(11,29,51,0.85)';
+        ctx.strokeText(c.text, cx2, cy2 - 60 * k - rise);
+        ctx.fillStyle = c.color;
+        ctx.fillText(c.text, cx2, cy2 - 60 * k - rise);
+        ctx.globalAlpha = 1;
+      }
       void SK_R;
       void GOALIE_R;
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [buffer, roster]);
+  }, [buffer, roster, fx]);
 
   return <canvas ref={ref} />;
 }
