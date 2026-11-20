@@ -521,9 +521,12 @@ export class HockeyMatch {
       // PASS / POKE edge
       if (inp.pass && !s.prevPass) {
         if (this.puck.carrierId === s.id) {
-          if (this.t - s.pickupAt <= CFG.catch.afterMs && !s.pickupCaught) {
+          const sincePickup = this.t - s.pickupAt;
+          if (sincePickup <= CFG.catch.afterMs && !s.pickupCaught) {
             // a slightly late POKE press right after receiving still counts as a clean catch
             this.cleanCatch(s);
+          } else if (sincePickup < CFG.catch.passLockMs) {
+            // just got the puck: ignore the press so a late catch attempt never becomes a pass
           } else if (s.chargingSince === null) {
             this.doPass(s, dirX, dirY, mag);
           }
@@ -779,11 +782,14 @@ export class HockeyMatch {
     if (d > CFG.catch.incomingRange) return false;
     const reach = SK.radius + PK.radius;
     if (d <= reach + 6) return true;
-    const closing = (p.vx * dx + p.vy * dy) / d; // speed toward the skater
+    // relative velocity: works for a puck sliding to you AND for you skating onto a resting puck
+    const rvx = p.vx - s.vx;
+    const rvy = p.vy - s.vy;
+    const closing = (rvx * dx + rvy * dy) / d; // closing speed
     if (closing < 60) return false;
-    // will the puck's path pass within reach of us?
-    const sp = Math.hypot(p.vx, p.vy);
-    const cross = Math.abs(p.vx * dy - p.vy * dx) / sp;
+    // will the (relative) path pass within reach of us?
+    const sp = Math.hypot(rvx, rvy);
+    const cross = Math.abs(rvx * dy - rvy * dx) / sp;
     return cross <= reach + 10 && ((d - reach) / closing) * 1000 <= CFG.catch.incomingTimeMs;
   }
 

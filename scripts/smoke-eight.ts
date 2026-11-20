@@ -106,10 +106,13 @@ async function toMatch(tv: Client, phones: Client[], red: number) {
 function streamRandomInput(phones: Client[], ms: number) {
   return new Promise<void>((resolve) => {
     let t = 0;
+    const angles = phones.map(() => Math.random() * Math.PI * 2);
     const iv = setInterval(() => {
       t += 40;
-      for (const p of phones) {
-        const a = Math.random() * Math.PI * 2;
+      // hold each direction ~0.5s so skaters actually travel (not just jitter in place)
+      if (t % 480 === 0) angles.forEach((_, i) => (angles[i] = Math.random() * Math.PI * 2));
+      for (const [i, p] of phones.entries()) {
+        const a = angles[i];
         const shoot = Math.random() < 0.35;
         p.input(Math.cos(a), Math.sin(a), Math.random() < 0.1, shoot, !shoot && Math.random() < 0.05);
       }

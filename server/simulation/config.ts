@@ -84,7 +84,9 @@ export const CFG = {
   catch: {
     /** POKE pressed while a loose puck is about to reach you arms a clean catch */
     beforeMs: 200,
-    afterMs: 80,
+    afterMs: 150,
+    /** after gaining the puck, PASS is ignored this long (a late catch tap must never become a pass) */
+    passLockMs: 300,
     /** how close / soon an incoming loose puck must be for POKE to count as a catch attempt */
     incomingRange: 220,
     incomingTimeMs: 600,

@@ -374,6 +374,44 @@ describe('skill moves', () => {
     expect(c.stumbleUntil).toBeLessThanOrEqual(m.t); // catch attempts never count as whiffs
   });
 
+  it('clean catch also works skating onto a resting puck', () => {
+    const m = playing();
+    const a = place(m, 'a', 400, 340);
+    Object.assign(m.puck, { x: 520, y: 340, vx: 0, vy: 0, carrierId: null, lastReleasedBy: null });
+    m.setInput('a', { x: 1, y: 0 });
+    let pressed = false;
+    for (let i = 0; i < 120 && m.puck.carrierId !== 'a'; i++) {
+      if (!pressed && m.catchHint(a) && Math.hypot(m.puck.x - a.x, m.puck.y - a.y) < 60) {
+        m.setInput('a', { x: 1, y: 0, pass: true });
+        pressed = true;
+      }
+      m.step();
+    }
+    expect(pressed).toBe(true);
+    expect(m.puck.carrierId).toBe('a');
+    expect(a.stats.catches).toBe(1);
+  });
+
+  it('a POKE tap shortly after pickup never turns into a pass', () => {
+    const m = playing();
+    const a = place(m, 'a', 400, 340);
+    Object.assign(m.puck, { x: 418, y: 340, vx: 0, vy: 0, carrierId: null, lastReleasedBy: null });
+    m.step();
+    expect(m.puck.carrierId).toBe('a');
+    // too late for a clean catch (after the catch window) but inside the pass lock
+    steps(m, ticks(CFG.catch.afterMs + 50));
+    m.setInput('a', { pass: true });
+    m.step();
+    m.setInput('a', { pass: false });
+    expect(m.puck.carrierId).toBe('a');
+    // after the lock, PASS works normally
+    steps(m, ticks(CFG.catch.passLockMs));
+    m.setInput('a', { pass: true });
+    m.step();
+    expect(m.puck.carrierId).toBeNull();
+    void a;
+  });
+
   it('perfect release (80–95% charge) beats a full charge', () => {
     const speedAfter = (holdMs: number) => {
       const m = playing();
