@@ -430,3 +430,44 @@ describe('input handling', () => {
     expect(s.connected).toBe(false);
   });
 });
+
+describe('guide rings + tips', () => {
+  it('clean catches / one-timers accumulate across matches and feed the next match', () => {
+    const { room } = makeRoom();
+    const { ps, host } = toTeams(room, 1, 1);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    const s = room.match!.getSkater(ps[0].player.id)!;
+    s.stats.catches = 2;
+    s.stats.oneTimers = 1;
+    room.match!.devSetClock(10);
+    for (let i = 0; i < 400 && room.phase !== 'RESULTS'; i++) room.tick();
+    expect(room.phase).toBe('RESULTS');
+    expect(room.getPlayer(ps[0].player.id)!.learned).toEqual({ catches: 2, oneTimers: 1 });
+    room.advance(host, 'REMATCH');
+    ps.forEach((p) => room.setReady(p.player.id, true));
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    expect(room.match!.getSkater(ps[0].player.id)!.learned).toEqual({ catches: 2, oneTimers: 1 });
+  });
+
+  it('admin can switch the timing rings off, including mid-match', () => {
+    const { room } = makeRoom();
+    const { host } = toTeams(room, 1, 1);
+    expect(room.publicState().guideRings).toBe(true);
+    room.advance(host, 'NEXT');
+    room.advance(host, 'START_MATCH');
+    room.setGuideRings(false);
+    expect(room.publicState().guideRings).toBe(false);
+    expect(room.match!.guideRings).toBe(false);
+  });
+
+  it('personalTip picks a tip from the weakest area', async () => {
+    const { personalTip } = await import('../../shared/tips');
+    const base = { number: 1, name: 'A', team: 'RED' as const, goals: 0, shots: 0, steals: 0, catches: 0, oneTimers: 0, perfects: 0 };
+    expect(personalTip(base)).toMatch(/take a shot/);
+    expect(personalTip({ ...base, shots: 5 })).toMatch(/SKILL SHOT/);
+    expect(personalTip({ ...base, shots: 5, perfects: 1 })).toMatch(/steal/i);
+    expect(personalTip({ ...base, shots: 5, perfects: 1, steals: 2, oneTimers: 1, catches: 1 })).toMatch(/Nice game/);
+  });
+});

@@ -37,6 +37,8 @@ export interface Player {
   /** a deliberately bad test bot */
   dumbBot: boolean;
   look: Look;
+  /** clean catches / one-timers landed tonight (TV timing ring stops after a few) */
+  learned: { catches: number; oneTimers: number };
   lastSeq: number;
   lastInputAt: number;
 }
@@ -106,6 +108,7 @@ export class Room {
   private seed: number;
   readonly devHooks: boolean;
   private matchCount = 0;
+  guideRings = true;
   private lastPublicPhase: Phase = 'LOBBY';
 
   constructor(opts: RoomOptions = {}) {
@@ -185,6 +188,7 @@ export class Room {
       joinOpen: this.joinOpen,
       result: this.result,
       devHooks: this.devHooks,
+      guideRings: this.guideRings,
     };
   }
 
@@ -234,6 +238,7 @@ export class Room {
       testPlayer: false,
       dumbBot: false,
       look: randomLook(this.random),
+      learned: { catches: 0, oneTimers: 0 },
       lastSeq: -1,
       lastInputAt: 0,
     };
@@ -560,9 +565,10 @@ export class Room {
     for (const p of this.players) p.inMatch = skaters.includes(p);
     this.matchCount++;
     this.match = new HockeyMatch(
-      skaters.map((p) => ({ id: p.id, number: p.number, team: p.team! })),
+      skaters.map((p) => ({ id: p.id, number: p.number, team: p.team!, learned: { ...p.learned } })),
       this.durationSeconds * 1000,
       this.seed + this.matchCount * 7919,
+      { guideRings: this.guideRings },
     );
     const m = this.match;
     m.onGoal = (team, before) => this.maybeQuip(m, team, before);
@@ -581,6 +587,13 @@ export class Room {
     if (this.stage !== 'MATCH' || !this.match) throw new RoomError('BAD_PHASE', 'Nothing to pause');
     const ok = paused ? this.match.pause() : this.match.resume();
     if (ok) this.dirty = true;
+  }
+
+  /** Admin: turn the TV timing ring on/off (takes effect immediately). */
+  setGuideRings(on: boolean) {
+    this.guideRings = on;
+    if (this.match) this.match.guideRings = on;
+    this.dirty = true;
   }
 
   /** Admin: end the current match immediately (goes to results). */
@@ -647,6 +660,13 @@ export class Room {
       this.driveTestPlayers(m);
       m.step();
       if (m.phase === 'OVER') {
+        for (const s of m.skaters) {
+          const pl = this.getPlayer(s.id);
+          if (pl) {
+            pl.learned.catches += s.stats.catches;
+            pl.learned.oneTimers += s.stats.oneTimers;
+          }
+        }
         const stats: PlayerStat[] = m.skaters.map((s) => ({
           number: s.number,
           name: this.getPlayer(s.id)?.name ?? `P${s.number}`,

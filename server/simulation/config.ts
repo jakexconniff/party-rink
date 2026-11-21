@@ -90,6 +90,11 @@ export const CFG = {
     /** how close / soon an incoming loose puck must be for POKE to count as a catch attempt */
     incomingRange: 220,
     incomingTimeMs: 600,
+    /** TV timing ring: shown this long before an incoming puck arrives (looks further than incomingRange) */
+    ringMs: 750,
+    ringRange: 480,
+    /** after this many successes of a move, that player's ring stops showing */
+    ringLearnedAfter: 3,
     boostFactor: 1.3,
     boostMs: 600,
   },

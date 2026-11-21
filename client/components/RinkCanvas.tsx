@@ -34,6 +34,8 @@ export interface Callout {
   y: number;
   born: number;
   big?: boolean;
+  /** comic-book burst that follows this skater (skill moves) */
+  burst?: number;
 }
 
 /** Visual effects fed by match events (see Tv.tsx). */
@@ -394,6 +396,36 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
                 ctx.stroke();
               }
             }
+            // timing ring: a puck is about to reach this skater. The ring shrinks onto the
+            // white target as it arrives; the target turns green inside the catch window.
+            if (snap.rg && snap.rg[0] === s.n && !off) {
+              const [, kind, frac] = snap.rg;
+              const accent = accentColor(roster.current[s.n]?.look);
+              const r0 = 26 * z;
+              const r = r0 + 70 * z * Math.max(0, frac);
+              const now2 = frac <= 0.27; // ≈ the last 200ms: tap now
+              ctx.lineWidth = (now2 ? 5 : 3) * k;
+              ctx.strokeStyle = now2 ? '#3cff8c' : 'rgba(255,255,255,0.85)';
+              ctx.beginPath();
+              ctx.ellipse(px, py, r0, r0 * SQUASH, 0, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.lineWidth = 4 * k;
+              ctx.strokeStyle = accent;
+              ctx.globalAlpha = 0.5 + 0.5 * (1 - frac);
+              ctx.beginPath();
+              ctx.ellipse(px, py, r, r * SQUASH, 0, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.globalAlpha = 1;
+              const label = kind === 1 ? 'HOLD SHOOT' : 'POKE!';
+              ctx.font = `900 ${13 * z}px system-ui, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.lineWidth = 4 * k;
+              ctx.strokeStyle = 'rgba(11,29,51,0.9)';
+              ctx.strokeText(label, px, py + r0 * SQUASH + 14 * z);
+              ctx.fillStyle = now2 ? '#3cff8c' : '#ffffff';
+              ctx.fillText(label, px, py + r0 * SQUASH + 14 * z);
+            }
             shadow(s.x, s.y, 17);
             // charge / aim arrow on the ice — turns green in the PERFECT window, red when over-charged
             if (s.ch >= 0) {
@@ -595,10 +627,60 @@ export function RinkCanvas({ buffer, roster, fx }: Props) {
       ents.sort((a, b) => a.y - b.y);
       for (const e of ents) e.draw();
 
-      // floating callouts (STOLEN!, PERFECT!, ONE-TIMER!, CLEAN!, whiff)
-      const LIFE = 1100;
-      fx.current.callouts = fx.current.callouts.filter((c) => now - c.born < LIFE);
+      // comic-book bursts for skill moves, pinned above the skater who did it
+      const BURST_LIFE = 1400;
       for (const c of fx.current.callouts) {
+        if (!c.burst) continue;
+        const age = now - c.born;
+        if (age >= BURST_LIFE) continue;
+        const sk = snap.sk.find((x) => x.n === c.burst);
+        const z = S(sk ? sk.y : c.y) * SKATER_DRAW_SCALE;
+        const [bx, by0] = P(sk ? sk.x : c.x, sk ? sk.y : c.y);
+        const by = by0 - 105 * z;
+        const pop = age < 120 ? 0.4 + (age / 120) * 0.8 : age < 220 ? 1.2 - ((age - 120) / 100) * 0.2 : 1;
+        ctx.globalAlpha = age > BURST_LIFE - 250 ? (BURST_LIFE - age) / 250 : 1;
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(-0.08);
+        ctx.scale(pop, pop);
+        ctx.font = `italic 900 ${24 * z}px Impact, 'Arial Black', system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const tw = ctx.measureText(c.text).width;
+        const rx = tw / 2 + 22 * z;
+        const ry = 26 * z;
+        // spiky starburst
+        const spikes = 14;
+        ctx.beginPath();
+        for (let i = 0; i < spikes * 2; i++) {
+          const a = (i / (spikes * 2)) * Math.PI * 2;
+          const f = i % 2 === 0 ? 1 : 0.72;
+          const x = Math.cos(a) * rx * f;
+          const y = Math.sin(a) * ry * f;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = c.color;
+        ctx.strokeStyle = '#0b1d33';
+        ctx.lineWidth = 3.5 * z;
+        ctx.lineJoin = 'round';
+        ctx.fill();
+        ctx.stroke();
+        ctx.lineWidth = 4 * z;
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeText(c.text, 0, 1 * z);
+        ctx.fillStyle = '#0b1d33';
+        ctx.fillText(c.text, 0, 1 * z);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      // floating text callouts (whiff)
+      const LIFE = 1100;
+      fx.current.callouts = fx.current.callouts.filter((c) => now - c.born < (c.burst ? BURST_LIFE : LIFE));
+      for (const c of fx.current.callouts) {
+        if (c.burst) continue;
         const age = (now - c.born) / LIFE;
         const [cx2, cy2] = P(c.x, c.y);
         const rise = age * 50 * k;

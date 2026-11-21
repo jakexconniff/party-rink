@@ -62,6 +62,13 @@ export interface Skater {
   boostUntil: number;
   slowUntil: number;
   stats: SkaterStats;
+  /** successes from earlier matches tonight (timing-ring fade-out) */
+  learned: Learned;
+}
+
+export interface Learned {
+  catches: number;
+  oneTimers: number;
 }
 
 export interface Puck {
@@ -103,11 +110,14 @@ export interface MatchPlayer {
   id: string;
   number: number;
   team: Team;
+  learned?: Learned;
 }
 
 export interface MatchOptions {
   /** always use the full-size rink regardless of player count (tests) */
   fullRink?: boolean;
+  /** show the TV timing ring for incoming pucks (default true) */
+  guideRings?: boolean;
 }
 
 const { goal, skater: SK, puck: PK } = CFG;
@@ -156,6 +166,7 @@ export class HockeyMatch {
   /** called right after a goal is scored, with the score before that goal */
   onGoal?: (team: Team, before: Record<Team, number>) => void;
   private rand: () => number;
+  guideRings: boolean;
 
   constructor(players: MatchPlayer[], durationMs: number, seed = 1, opts: MatchOptions = {}) {
     this.clockMs = durationMs;
@@ -192,7 +203,9 @@ export class HockeyMatch {
         boostUntil: 0,
         slowUntil: 0,
         stats: emptyStats(),
+        learned: { catches: p.learned?.catches ?? 0, oneTimers: p.learned?.oneTimers ?? 0 },
       }));
+    this.guideRings = opts.guideRings ?? true;
     this.puck = {
       x: this.R.cx,
       y: this.R.cy,
@@ -362,7 +375,9 @@ export class HockeyMatch {
     const r1 = (v: number) => Math.round(v * 10) / 10;
     const r2 = (v: number) => Math.round(v * 100) / 100;
     const carrier = this.puck.carrierId ? this.getSkater(this.puck.carrierId) : undefined;
+    const ring = this.ringFor();
     return {
+      ...(ring ? { rg: [ring.n, ring.kind, ring.frac] as Snapshot['rg'] } : {}),
       t: Math.round(this.t),
       phase: this.phase,
       clockMs: Math.ceil(this.clockMs),
@@ -806,23 +821,60 @@ export class HockeyMatch {
 
   /** Is a loose puck about to reach this skater? */
   private incomingPuck(s: Skater) {
+    const eta = this.incomingEta(s, CFG.catch.incomingRange);
+    return eta !== null && eta <= CFG.catch.incomingTimeMs;
+  }
+
+  /** ms until a loose puck reaches this skater (0 = touching), or null if it isn't heading here. */
+  private incomingEta(s: Skater, range: number): number | null {
     const p = this.puck;
-    if (p.carrierId) return false;
+    if (p.carrierId) return null;
     const dx = s.x - p.x;
     const dy = s.y - p.y;
     const d = Math.hypot(dx, dy);
-    if (d > CFG.catch.incomingRange) return false;
+    if (d > range) return null;
     const reach = SK.radius + PK.radius;
-    if (d <= reach + 6) return true;
+    if (d <= reach + 6) return 0;
     // relative velocity: works for a puck sliding to you AND for you skating onto a resting puck
     const rvx = p.vx - s.vx;
     const rvy = p.vy - s.vy;
     const closing = (rvx * dx + rvy * dy) / d; // closing speed
-    if (closing < 60) return false;
+    if (closing < 60) return null;
     // will the (relative) path pass within reach of us?
     const sp = Math.hypot(rvx, rvy);
     const cross = Math.abs(rvx * dy - rvy * dx) / sp;
-    return cross <= reach + 10 && ((d - reach) / closing) * 1000 <= CFG.catch.incomingTimeMs;
+    if (cross > reach + 10) return null;
+    return ((d - reach) / closing) * 1000;
+  }
+
+  /**
+   * TV timing ring: the one skater the loose puck is about to reach, if they still need the hint.
+   * kind 0 = clean catch (tap POKE when the ring closes), 1 = one-timer (hold SHOOT before it arrives).
+   */
+  ringFor(): { n: number; kind: 0 | 1; frac: number } | null {
+    if (!this.guideRings || this.phase !== 'PLAYING' || this.puck.carrierId) return null;
+    const C = CFG.catch;
+    let best: Skater | null = null;
+    let bestEta = Infinity;
+    for (const s of this.skaters) {
+      if (!s.connected) continue;
+      const eta = this.incomingEta(s, C.ringRange);
+      if (eta !== null && eta < bestEta) {
+        best = s;
+        bestEta = eta;
+      }
+    }
+    if (!best || bestEta > C.ringMs || bestEta <= 0) return null;
+    const p = this.puck;
+    const teammatePass =
+      p.launchKind === 'pass' &&
+      p.lastReleasedBy !== null &&
+      p.lastReleasedBy !== best.id &&
+      this.getSkater(p.lastReleasedBy)?.team === best.team;
+    const needs = (k: 'catches' | 'oneTimers') => best!.learned[k] + best!.stats[k] < C.ringLearnedAfter;
+    const kind: 0 | 1 | null = teammatePass && needs('oneTimers') ? 1 : needs('catches') ? 0 : null;
+    if (kind === null) return null;
+    return { n: best.number, kind, frac: Math.round((bestEta / C.ringMs) * 100) / 100 };
   }
 
   private doPoke(s: Skater, dirX: number, dirY: number, mag: number) {

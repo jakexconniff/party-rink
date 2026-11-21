@@ -8,9 +8,11 @@ const BASICS: [string, string][] = [
 ];
 
 const SKILLS: [string, string][] = [
-  ['Perfect shot', 'Release SHOOT while the fill is in the green band. Faster, harder to save'],
-  ['One-timer', 'Hold SHOOT before a teammate’s pass reaches you. It fires instantly'],
-  ['Clean catch', 'Tap POKE just as a loose puck reaches you (button glows). Speed boost'],
+  ['SKILL SHOT', 'Release SHOOT while the fill is in the green band. Faster, harder to save'],
+  ['ONE-TIMER', 'Hold SHOOT before a teammate’s pass reaches you. It fires instantly'],
+  ['CLEAN CATCH', 'Tap POKE just as a loose puck reaches you. Speed boost'],
+  ['STOLEN', 'Tap POKE right next to the carrier while facing them'],
+  ['Shrinking ring', 'The puck is about to reach you. Act when it closes on your skater (new players only)'],
   ['Don’t whiff', 'POKE with nothing nearby makes you stumble and slows your next poke'],
   ['Bumping', 'Running into the carrier slows them down but never steals the puck'],
 ];

@@ -93,6 +93,8 @@ export interface RoomState {
   joinOpen: boolean;
   result: MatchResult | null;
   devHooks: boolean;
+  /** TV timing ring for incoming pucks (Admin can turn it off) */
+  guideRings: boolean;
 }
 
 /** Phone → server controller state. */
@@ -146,6 +148,8 @@ export interface Snapshot {
   /** puck x, y, carrier player number (0 = loose) */
   puck: [number, number, number];
   sk: SkaterSnap[];
+  /** timing ring: [player number, 0 clean catch | 1 one-timer, time left 0..1] while a puck is about to reach them */
+  rg?: [number, 0 | 1, number];
   gl: [GoalieSnap, GoalieSnap];
   /** playable rink bounds for this match: minX, maxX, minY, maxY */
   rk: [number, number, number, number];

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { makeSocket, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { RinkCanvas, type FxState, type RosterInfo, type SnapBuffer } from '../components/RinkCanvas';
 import { HelpSheet } from '../components/Help';
+import { TIPS, TIP_ROTATE_MS } from '../../shared/tips';
 import type { AdvanceAction, ErrorMsg, MatchEvent, PublicPlayer, RoomState, ServerInfo, Snapshot, Team } from '../../shared/types';
 
 export function Tv() {
@@ -22,6 +23,9 @@ export function Tv() {
     const name = (n: number) => roster.current[n]?.name ?? `P${n}`;
     const add = (text: string, color: string, x: number, y: number, big = false) =>
       fx.current.callouts.push({ text, color, x, y, born: performance.now(), big });
+    // comic-book burst over the skater who pulled off a skill move
+    const burst = (text: string, color: string, by: number, x: number, y: number) =>
+      fx.current.callouts.push({ text, color, x, y, born: performance.now(), burst: by });
     const onEvent = (e: MatchEvent) => {
       switch (e.type) {
         case 'goal':
@@ -29,14 +33,14 @@ export function Tv() {
           setLastGoalInfo({ scorer: e.scorer ? `#${e.scorer} ${name(e.scorer)}` : null, hatTrick: e.goals === 3 });
           break;
         case 'steal':
-          add('STOLEN!', '#ffd23f', e.x, e.y);
+          burst('STOLEN!', '#ffd23f', e.by, e.x, e.y);
           break;
         case 'shot':
-          if (e.oneTimer) add('ONE-TIMER!', '#ff8a3d', e.x, e.y, true);
-          else if (e.perfect) add('PERFECT!', '#3cff8c', e.x, e.y, true);
+          if (e.oneTimer) burst('ONE-TIMER!', '#ff8a3d', e.by, e.x, e.y);
+          else if (e.perfect) burst('SKILL SHOT!', '#3cff8c', e.by, e.x, e.y);
           break;
         case 'cleanCatch':
-          add('CLEAN!', '#50e6ff', e.x, e.y);
+          burst('CLEAN CATCH!', '#50e6ff', e.by, e.x, e.y);
           break;
         case 'whiff':
           add('whiff', '#b9c4d6', e.x, e.y);
@@ -238,7 +242,22 @@ function Lobby({
             Testing by yourself? Click <b>Admin</b> (bottom-left) → <b>Add test player</b>.
           </div>
         ) : null}
+        <TipTicker />
       </div>
+    </div>
+  );
+}
+
+/** Rotating gameplay tip (lobby + results), so people pick up the skill moves while they wait. */
+function TipTicker() {
+  const [i, setI] = useState(() => Math.floor(Math.random() * TIPS.length));
+  useEffect(() => {
+    const iv = window.setInterval(() => setI((v) => (v + 1) % TIPS.length), TIP_ROTATE_MS);
+    return () => window.clearInterval(iv);
+  }, []);
+  return (
+    <div className="tip-ticker" key={i}>
+      <span className="tip-label">TIP</span> {TIPS[i]}
     </div>
   );
 }
@@ -416,7 +435,7 @@ function Results({
               <th>Shots</th>
               <th>Steals</th>
               <th>One-timers</th>
-              <th>Perfect</th>
+              <th>Skill shots</th>
               <th>Clean catches</th>
             </tr>
           </thead>
@@ -439,6 +458,7 @@ function Results({
           </tbody>
         </table>
       ) : null}
+      <TipTicker />
       <div className="check-msg">
         {host ? `${host.name} (host): Rematch or New game on your phone` : 'Waiting for host…'}
       </div>
@@ -493,6 +513,14 @@ function AdminPanel({ room, socket }: { room: RoomState; socket: ReturnType<type
           Remove test players
         </button>
       ) : null}
+      <label className="lbl" style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={room.guideRings}
+          onChange={(e) => socket.emit('admin:guideRings', { on: e.target.checked })}
+        />
+        Timing rings for new players
+      </label>
       <div className="lbl">Host override ({room.phase})</div>
       {(actions[room.phase] ?? []).map(([a, label]) => (
         <button key={a} onClick={() => adv(a)}>

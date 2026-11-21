@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { personalTip } from '../../shared/tips';
 import { makeSocket, storage, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { Controller } from '../components/Controller';
 import { LookEditor } from '../components/LookEditor';
@@ -440,8 +441,9 @@ function PhaseView({
                 {r?.mvp === self.number ? <b style={{ color: '#ffd23f' }}>⭐ You're the MVP!</b> : null}
                 <p>
                   You: {mine.goals} goals · {mine.shots} shots · {mine.steals} steals · {mine.oneTimers} one-timers ·{' '}
-                  {mine.perfects} perfect · {mine.catches} clean catches
+                  {mine.perfects} skill shots · {mine.catches} clean catches
                 </p>
+                <p className="personal-tip">💡 {personalTip(mine)}</p>
               </div>
             );
           })()}

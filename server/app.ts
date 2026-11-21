@@ -317,6 +317,13 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
         room.endMatch();
       }),
     );
+    socket.on(
+      'admin:guideRings',
+      guard((payload: { on?: unknown }) => {
+        adminGuard();
+        room.setGuideRings(payload?.on === true);
+      }),
+    );
 
     if (room.devHooks) {
       socket.on(

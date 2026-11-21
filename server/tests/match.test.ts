@@ -326,6 +326,47 @@ describe('skill moves', () => {
     m.setInput('a', { pass: false });
   };
 
+  /** step until the timing ring appears (or the pass is received); returns the rings seen */
+  const watchRing = (m: HockeyMatch) => {
+    const seen: NonNullable<ReturnType<HockeyMatch['snapshot']>['rg']>[] = [];
+    for (let i = 0; i < 90 && m.puck.carrierId !== 'c'; i++) {
+      m.step();
+      const rg = m.snapshot().rg;
+      if (rg) seen.push(rg);
+    }
+    return seen;
+  };
+
+  it('timing ring: a teammate pass shows a one-timer ring on the receiver that shrinks', () => {
+    const m = passSetup();
+    doPass(m);
+    const seen = watchRing(m);
+    expect(seen.length).toBeGreaterThan(3);
+    expect(seen.every((r) => r[0] === 3 && r[1] === 1)).toBe(true);
+    expect(seen[seen.length - 1][2]).toBeLessThan(seen[0][2]);
+    expect(seen.every((r) => r[2] > 0 && r[2] <= 1)).toBe(true);
+  });
+
+  it('timing ring: falls back to a clean-catch ring once one-timers are learned, then disappears', () => {
+    const learned = (oneTimers: number, catches: number) => {
+      const m = passSetup();
+      Object.assign(m.getSkater('c')!.learned, { oneTimers, catches });
+      doPass(m);
+      return watchRing(m);
+    };
+    const half = learned(CFG.catch.ringLearnedAfter, 0);
+    expect(half.length).toBeGreaterThan(0);
+    expect(half.every((r) => r[1] === 0)).toBe(true);
+    expect(learned(CFG.catch.ringLearnedAfter, CFG.catch.ringLearnedAfter)).toHaveLength(0);
+  });
+
+  it('timing ring: can be switched off', () => {
+    const m = passSetup();
+    m.guideRings = false;
+    doPass(m);
+    expect(watchRing(m)).toHaveLength(0);
+  });
+
   it('one-timer: holding SHOOT as a teammate’s pass arrives fires instantly', () => {
     const m = passSetup();
     m.setInput('c', { shoot: true, x: 1, y: 0 });

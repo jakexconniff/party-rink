@@ -38,11 +38,15 @@ On the laptop's TV page, click **Admin** (bottom-left), then **+ Add test player
 
 | Move | How | What you'll see |
 |---|---|---|
-| **Steal** | Tap **POKE** right next to the opponent carrying the puck, facing them | "STOLEN!" on the TV. Bumping into someone never steals, it only slows them down. |
+| **Steal** | Tap **POKE** right next to the opponent carrying the puck, facing them | A "STOLEN!" comic burst over your skater. Bumping into someone never steals, it only slows them down. |
 | **Whiff** | Tap POKE with nothing nearby | Dizzy stars, half speed for a moment, and a longer POKE cooldown (the button greys out) |
-| **Perfect shot** | Hold SHOOT and release while the fill is in the **green band** (80–95%) | The aim arrow turns green, then "PERFECT!" and a faster shot. Holding too long makes the aim wobble (red). |
-| **One-timer** | Hold SHOOT *before* a teammate's pass reaches you | The puck is shot instantly on arrival ("ONE-TIMER!"). Aim with the stick. |
-| **Clean catch** | Tap POKE just as a loose puck reaches you (the button glows) | Speed boost ("CLEAN!") |
+| **Skill shot** | Hold SHOOT and release while the fill is in the **green band** (80–95%) | The aim arrow turns green, then a "SKILL SHOT!" burst and a faster shot. Holding too long makes the aim wobble (red). |
+| **One-timer** | Hold SHOOT *before* a teammate's pass reaches you (the ring says HOLD SHOOT) | The puck is shot instantly on arrival ("ONE-TIMER!" burst). Aim with the stick. |
+| **Clean catch** | Tap POKE just as a loose puck reaches you: when the shrinking ring closes and turns green | Speed boost ("CLEAN CATCH!" burst) |
+
+**Timing ring:** when a puck is about to reach you, a ring in your color shrinks onto your skater on the TV. Once you've landed 3 clean catches (or 3 one-timers) tonight, that ring stops showing for you. Admin → "Timing rings for new players" turns it off for everyone.
+
+**Tips:** the TV lobby and results screens rotate gameplay tips every 7 seconds (edit them in `shared/tips.ts`). After each match, every phone shows one personal tip based on that player's stats.
 
 Carrying the puck makes you a bit slower, so passing pays off. The rink is smaller for 2–4 players.
 
