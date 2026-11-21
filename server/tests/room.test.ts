@@ -394,6 +394,21 @@ describe('character heads', () => {
       'the yellow bear',
     );
   });
+
+  it('fantasy heads are character heads and survive sanitizeLook', () => {
+    const ids = ['fishfolk', 'ogre', 'orc', 'troll', 'undead', 'gnome', 'goblin', 'pirate'];
+    expect(new Set(HEADS.map((h) => h.id)).size).toBe(HEADS.length);
+    for (const id of ids) {
+      const head = HEADS.findIndex((h) => h.id === id);
+      expect(head, id).toBeGreaterThan(-1);
+      expect(isCharacterHead(head), id).toBe(true);
+      const look = { skin: 0, head, face: 0, body: 1, accent: 3 };
+      expect(sanitizeLook(look)).toEqual(look);
+    }
+    expect(describeLook({ skin: 0, head: HEADS.findIndex((h) => h.id === 'troll'), face: 0, body: 1, accent: 3 })).toBe(
+      'the cyan troll',
+    );
+  });
 });
 
 describe('input handling', () => {

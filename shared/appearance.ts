@@ -28,6 +28,14 @@ export const HEADS = [
   { id: 'shark', label: 'Shark', character: true },
   { id: 'chicken', label: 'Chicken', character: true },
   { id: 'unicorn', label: 'Unicorn', character: true },
+  { id: 'fishfolk', label: 'Fish-man', character: true },
+  { id: 'ogre', label: 'Ogre', character: true },
+  { id: 'orc', label: 'Orc', character: true },
+  { id: 'troll', label: 'Troll', character: true },
+  { id: 'undead', label: 'Undead', character: true },
+  { id: 'gnome', label: 'Gnome', character: true },
+  { id: 'goblin', label: 'Goblin', character: true },
+  { id: 'pirate', label: 'Pirate', character: true },
 ] as const;
 
 export const isCharacterHead = (head: number) => !!HEADS[head]?.character;
