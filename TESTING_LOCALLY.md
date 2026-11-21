@@ -48,7 +48,7 @@ Carrying the puck makes you a bit slower, so passing pays off. The rink is small
 
 ## 6. Finish quickly
 
-On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match now** jumps to results. On your phone, **Rematch** returns to teams and **New game** returns to game select.
+On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match now** jumps to results. On your phone, **Rematch** returns to teams and **New game** returns to game select. The results screen on the laptop also has **Rematch**, **New game** and **Back to home** (lobby, players kept), so the TV can move on even if the host has left.
 
 ## Other useful checks
 

@@ -128,7 +128,7 @@ export function Tv() {
       ) : phase === 'TEAMS' || phase === 'SETTINGS' ? (
         <Teams room={room} />
       ) : (
-        <Results room={room} />
+        <Results room={room} socket={socket} canControl={!!info?.isLocal} />
       )}
       {room && !inMatch && phase !== 'LOBBY' && join ? (
         <div className="corner-qr">
@@ -382,7 +382,15 @@ function MatchView({
   );
 }
 
-function Results({ room }: { room: RoomState }) {
+function Results({
+  room,
+  socket,
+  canControl,
+}: {
+  room: RoomState;
+  socket: ReturnType<typeof makeSocket>;
+  canControl: boolean;
+}) {
   const r = room.result;
   const host = room.players.find((p) => p.isHost);
   return (
@@ -431,7 +439,18 @@ function Results({ room }: { room: RoomState }) {
           </tbody>
         </table>
       ) : null}
-      <div className="check-msg">{host ? `${host.name} (host): Rematch or New game on your phone` : 'Waiting for host…'}</div>
+      <div className="check-msg">
+        {host ? `${host.name} (host): Rematch or New game on your phone` : 'Waiting for host…'}
+      </div>
+      {canControl ? (
+        <div className="results-actions">
+          <button onClick={() => socket.emit('room:advance', { action: 'REMATCH' })}>Rematch</button>
+          <button onClick={() => socket.emit('room:advance', { action: 'NEW_GAME' })}>New game</button>
+          <button className="primary" onClick={() => socket.emit('admin:reset', { keepPlayers: true })}>
+            Back to home
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
