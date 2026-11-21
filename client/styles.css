@@ -71,7 +71,7 @@ button:disabled {
 
 /* ================= TV ================= */
 body.tv {
-  font-size: clamp(14px, 1.3vw, 30px);
+  font-size: clamp(14px, min(1.3vw, 2.3vh), 30px);
 }
 .tv-root {
   position: relative;
@@ -398,15 +398,15 @@ body.tv {
   }
 }
 .results {
-  font-size: 1.2em;
+  font-size: 1em;
 }
 .results .final {
-  font-size: 6em;
+  font-size: 3.6em;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 .results .winner {
-  font-size: 3.5em;
+  font-size: 2.3em;
   font-weight: 900;
 }
 .corner-qr {
@@ -1186,8 +1186,6 @@ table.stats tr.is-mvp td {
 .results-actions {
   display: flex;
   gap: 16px;
-  justify-content: center;
-  margin-top: 18px;
 }
 .results-actions button {
   font-size: 1.3rem;
@@ -1202,4 +1200,20 @@ table.stats tr.is-mvp td {
   background: #ffd23f;
   color: #111;
   border-color: #ffd23f;
+}
+/* results: keep 8 rows on screen */
+.tv-center.results {
+  gap: 0.5em;
+  padding: 1em 2em;
+  justify-content: safe center;
+}
+table.stats {
+  font-size: 1em;
+}
+table.stats td {
+  padding: 0.12em 0.8em;
+}
+table.stats .num-badge {
+  width: 1.5em;
+  height: 1.5em;
 }
