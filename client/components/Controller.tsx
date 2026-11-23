@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
-import type { ControlState, InputMsg, Team } from '../../shared/types';
+import type { ControlState, Team } from '../../shared/types';
 import { fmtClock } from '../net/socket';
 import { ACCENTS, describeLook, type Look } from '../../shared/appearance';
 import { SkaterPreview } from './LookEditor';
 import { HelpOverlay, HelpSheet } from './Help';
+import { useInputSender, useKeyboardMouse } from './keyboardInput';
 
 const STICK_RADIUS = 62;
-const SEND_MIN_MS = 33; // ≤30 Hz on change
-const HEARTBEAT_MS = 120;
 const CHARGE_MS = 1500;
 /** A computer with a mouse/trackpad (not a phone): show the keyboard hint instead of the thumb hint. */
 const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -84,10 +83,7 @@ function HoldToPause({ onPause, disabled }: { onPause: () => void; disabled: boo
 
 export function Controller({ socket, cs, team, name, number, look, connected, isHost }: Props) {
   const [helpOpen, setHelpOpen] = useState(false);
-  const input = useRef({ x: 0, y: 0, pass: false, shoot: false, cancel: false });
-  const seq = useRef(Date.now() % 1e6); // monotonically increasing across reloads
-  const lastSent = useRef(0);
-  const pending = useRef<number | null>(null);
+  const { input, send } = useInputSender(socket);
   const stickId = useRef<number | null>(null);
   const passId = useRef<number | null>(null);
   const shootId = useRef<number | null>(null);
@@ -99,33 +95,6 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
   const [shootDown, setShootDown] = useState(false);
   const shootStart = useRef(0);
   const [charge, setCharge] = useState(0);
-  // Keyboard + mouse (playing from a computer): held movement keys, and which keys/mouse buttons hold each action.
-  const keys = useRef(new Set<string>());
-  const kbPass = useRef(new Set<string>());
-  const kbShoot = useRef(new Set<string>());
-
-  const sendNow = () => {
-    pending.current = null;
-    lastSent.current = performance.now();
-    seq.current += 1;
-    const msg: InputMsg = { seq: seq.current, ...input.current };
-    socket.emit('input:state', msg);
-    input.current.cancel = false;
-  };
-  const send = (urgent = false) => {
-    const since = performance.now() - lastSent.current;
-    if (urgent || since >= SEND_MIN_MS) sendNow();
-    else if (pending.current === null) pending.current = window.setTimeout(sendNow, SEND_MIN_MS - since);
-  };
-
-  // heartbeat keeps the server's stale-input watchdog happy while a stick is held
-  useEffect(() => {
-    const iv = window.setInterval(() => {
-      if (performance.now() - lastSent.current >= HEARTBEAT_MS) sendNow();
-    }, HEARTBEAT_MS);
-    return () => window.clearInterval(iv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]);
 
   const placeStick = (show: boolean, bx = 0, by = 0, kx = 0, ky = 0) => {
     const b = baseEl.current;
@@ -140,9 +109,7 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
 
   const releaseAll = (cancel: boolean) => {
     stickId.current = passId.current = shootId.current = null;
-    keys.current.clear();
-    kbPass.current.clear();
-    kbShoot.current.clear();
+    kb.release();
     const wasShoot = input.current.shoot;
     input.current = { x: 0, y: 0, pass: false, shoot: false, cancel: cancel && wasShoot };
     setPassDown(false);
@@ -175,102 +142,25 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- keyboard + mouse: WASD/arrows skate, left click (or J) = PASS/POKE, right click (or K/Space) = SHOOT
-  useEffect(() => {
-    const MOVE: Record<string, [number, number]> = {
-      KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
-      KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0],
-    };
-    const applyKeys = () => {
+  // ---- keyboard + mouse (playing from a computer)
+  const kb = useKeyboardMouse({
+    onMove: (x, y) => {
       if (stickId.current !== null) return; // a finger on the stick wins
-      let x = 0;
-      let y = 0;
-      for (const k of keys.current) {
-        x += MOVE[k][0];
-        y += MOVE[k][1];
-      }
-      x = Math.sign(x);
-      y = Math.sign(y);
-      const d = Math.hypot(x, y) || 1;
-      input.current.x = Math.round((x / d) * 100) / 100;
-      input.current.y = Math.round((y / d) * 100) / 100;
+      input.current.x = x;
+      input.current.y = y;
       send(true);
-    };
-    // One action can be held by several sources (e.g. mouse + key); it's down while any of them is.
-    const press = (which: 'pass' | 'shoot', src: string, down: boolean) => {
-      const set = which === 'pass' ? kbPass.current : kbShoot.current;
-      const was = set.size > 0;
-      if (down) set.add(src);
-      else set.delete(src);
-      const now = set.size > 0;
-      if (now === was) return;
-      input.current[which] = now;
-      if (which === 'pass') setPassDown(now);
+    },
+    onButton: (which, down) => {
+      input.current[which] = down;
+      if (which === 'pass') setPassDown(down);
       else {
-        if (now) shootStart.current = performance.now();
+        if (down) shootStart.current = performance.now();
         else input.current.cancel = false;
-        setShootDown(now);
+        setShootDown(down);
       }
       send(true);
-    };
-    const ACTION: Record<string, 'pass' | 'shoot'> = { KeyJ: 'pass', KeyK: 'shoot', Space: 'shoot' };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (MOVE[e.code]) {
-        e.preventDefault();
-        if (!keys.current.has(e.code)) {
-          keys.current.add(e.code);
-          applyKeys();
-        }
-      } else if (ACTION[e.code]) {
-        e.preventDefault();
-        if (!e.repeat) press(ACTION[e.code], e.code, true);
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (MOVE[e.code] && keys.current.delete(e.code)) applyKeys();
-      else if (ACTION[e.code]) press(ACTION[e.code], e.code, false);
-    };
-    // Mouse only (touch taps also fire mouse events, so ignore those right after a touch).
-    let lastTouch = 0;
-    const onTouch = () => {
-      lastTouch = performance.now();
-    };
-    const isUi = (t: EventTarget | null) => {
-      const el = t instanceof Element ? t : null;
-      if (!el) return false;
-      // real buttons outside the play area (help, pause, resume, close) keep working with a click
-      return !!el.closest('button, a, input, .help-overlay') && !el.closest('.ctl-body');
-    };
-    // Stop the on-screen buttons from also reacting to the mouse; mousedown/mouseup handle it.
-    const onPointerDownCapture = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse' && !isUi(e.target)) e.stopPropagation();
-    };
-    const MOUSE: Record<number, 'pass' | 'shoot'> = { 0: 'pass', 2: 'shoot' };
-    const onMouseDown = (e: MouseEvent) => {
-      if (performance.now() - lastTouch < 1000 || isUi(e.target) || !MOUSE[e.button]) return;
-      e.preventDefault();
-      press(MOUSE[e.button], `mouse${e.button}`, true);
-    };
-    const onMouseUp = (e: MouseEvent) => {
-      if (MOUSE[e.button]) press(MOUSE[e.button], `mouse${e.button}`, false);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('touchstart', onTouch, { capture: true, passive: true });
-    window.addEventListener('pointerdown', onPointerDownCapture, true);
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('touchstart', onTouch, true);
-      window.removeEventListener('pointerdown', onPointerDownCapture, true);
-      window.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]);
+    },
+  });
 
   // charge meter animation (local, smooth; server is authoritative about the actual shot)
   useEffect(() => {

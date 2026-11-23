@@ -48,8 +48,8 @@ Keep that window open the whole night. Closing it ends the game.
 - Scan the QR code on the TV, type a name, tap **Join**. The first person in is the **HOST** and drives the menus on their phone.
 - Turn the phone **sideways** to play: left half is the joystick, top-right is **PASS/POKE**, bottom-right is **SHOOT** (tap, or hold to charge).
 - Tap **?** on a phone for the controls cheat sheet.
-- **No phone? Play on a computer.** Open the join address in a browser on any computer on the Wi-Fi: **WASD** or arrow keys skate, **left click** (or J) is PASS/POKE, **right click** (or K / Space) is SHOOT, hold to charge. Click once on the page first so it has keyboard focus.
-- **A player on the host laptop:** set the TV as a second screen (Windows key + P → **Extend**), drag the `/tv` window onto the TV and full-screen it, then open `http://localhost:3000/join` in a separate window on the laptop screen and play with the keyboard. Keep that window focused, since keys only go to the active window.
+- **Play on the TV computer itself (one tab):** on the TV page click **🎮 Play on this screen** (bottom-left). A side panel lets you join; you become the **host** and run the menus from that panel. During the match play with the keyboard: **WASD** or arrows skate, **left click** (or J) is PASS/POKE, **right click** (or K / Space) is SHOOT, hold to charge. **P** pauses. **Hide** tucks the panel away, **Stop** removes you from this screen.
+- **Another computer as a controller:** open the join address in its browser. The same keys work once the match starts (they do nothing in the menus).
 
 ### Running the night from the laptop
 

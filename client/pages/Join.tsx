@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { personalTip } from '../../shared/tips';
 import { makeSocket, storage, useConnected, useRoomState, fmtClock } from '../net/socket';
 import { Controller } from '../components/Controller';
+import { KeyboardPlayer } from '../components/KeyboardPlayer';
 import { LookEditor } from '../components/LookEditor';
 import { HelpOverlay } from '../components/Help';
 import {
@@ -17,11 +18,15 @@ import {
 
 // `/join?player=2` keeps a separate identity so several tabs on one computer can be different players.
 const SLOT = new URLSearchParams(location.search).get('player')?.replace(/[^\w-]/g, '').slice(0, 8) ?? '';
-const TOKEN = `partyrink.token${SLOT ? '.' + SLOT : ''}`;
-const NAME = `partyrink.name${SLOT ? '.' + SLOT : ''}`;
+const TOKEN0 = `partyrink.token${SLOT ? '.' + SLOT : ''}`;
+const NAME0 = `partyrink.name${SLOT ? '.' + SLOT : ''}`;
 const JOIN_ERRORS = new Set(['NAME_INVALID', 'ROOM_FULL', 'JOIN_CLOSED']);
 
-export function Join() {
+/** `embedded`: the player who plays on the TV screen itself (keyboard + mouse), shown in a side panel on /tv. */
+export function Join({ embedded = false }: { embedded?: boolean } = {}) {
+  const TOKEN = embedded ? 'partyrink.token.screen' : TOKEN0;
+  const NAME = embedded ? 'partyrink.name.screen' : NAME0;
+  const ph = embedded ? 'ph embedded' : 'ph';
   const socket = useMemo(() => makeSocket('phone'), []);
   const connected = useConnected(socket);
   const room = useRoomState(socket);
@@ -34,6 +39,9 @@ export function Join() {
   const [cs, setCs] = useState<ControlState | null>(null);
   const [everConnected, setEverConnected] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // The on-screen player can be switched off (TV "Stop"), so drop its connection when unmounted.
+  useEffect(() => () => void socket.close(), [socket]);
 
   // Forward phone-side problems to the server log (one place to troubleshoot).
   useEffect(() => {
@@ -59,7 +67,7 @@ export function Join() {
       sentToken = !!tok;
       if (tok) {
         setJoining(true);
-        socket.emit('player:join', { name: storage.get(NAME) ?? '', reconnectToken: tok });
+        socket.emit('player:join', { name: storage.get(NAME) ?? '', reconnectToken: tok, asHost: embedded || undefined });
       }
     };
     const onJoined = (m: JoinedMsg) => {
@@ -142,7 +150,7 @@ export function Join() {
   const doJoin = () => {
     setJoinError(null);
     setJoining(true);
-    socket.emit('player:join', { name, reconnectToken: storage.get(TOKEN) ?? undefined });
+    socket.emit('player:join', { name, reconnectToken: storage.get(TOKEN) ?? undefined, asHost: embedded || undefined });
   };
   const advance = (action: AdvanceAction) => socket.emit('room:advance', { action });
 
@@ -164,7 +172,7 @@ export function Join() {
 
   if (moved) {
     return (
-      <div className="ph">
+      <div className={ph}>
         {header}
         <h1>Opened somewhere else</h1>
         <p>Your player is now controlled from another tab or phone.</p>
@@ -179,7 +187,7 @@ export function Join() {
   if (!me || !self || !room) {
     const waitingForAuto = joining && !!storage.get(TOKEN);
     return (
-      <div className="ph">
+      <div className={ph}>
         {header}
         <h1>Join the game!</h1>
         <p>Type your name, then tap Join.</p>
@@ -226,6 +234,9 @@ export function Join() {
   // --------------------------------------------------------- controller
   const matchPhases = ['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'];
   if (matchPhases.includes(phase) && self.inMatch && self.team) {
+    if (embedded) {
+      return <KeyboardPlayer socket={socket} cs={cs} team={self.team} name={self.name} number={self.number} />;
+    }
     return (
       <>
         <Controller
@@ -248,7 +259,7 @@ export function Join() {
   }
 
   return (
-    <div className="ph">
+    <div className={ph}>
       {header}
       {!connected ? <div className="err">Reconnecting… keep this page open.</div> : null}
       {toast ? <div className="err">{toast}</div> : null}

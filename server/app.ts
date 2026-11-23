@@ -209,7 +209,7 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
 
     socket.on(
       'player:join',
-      guard((payload: { name?: unknown; reconnectToken?: unknown } = {}) => {
+      guard((payload: { name?: unknown; reconnectToken?: unknown; asHost?: unknown } = {}) => {
         if (role !== 'phone') return;
         const res = room.join(payload?.name, payload?.reconnectToken);
         if (!res.ok) {
@@ -223,6 +223,8 @@ export async function createPartyServer(opts: PartyServerOptions): Promise<Party
           old.data.playerId = null;
           old.disconnect(true);
         }
+        // The player on the TV screen itself (same computer as the server) runs the show.
+        if (payload?.asHost === true && local) room.makeHost(res.player.id);
         playerId = res.player.id;
         socket.data.playerId = playerId;
         socketsByPlayer.set(playerId, socket);

@@ -471,3 +471,20 @@ describe('guide rings + tips', () => {
     expect(personalTip({ ...base, shots: 5, perfects: 1, steals: 2, oneTimers: 1, catches: 1 })).toMatch(/Nice game/);
   });
 });
+
+describe('playing on the TV screen', () => {
+  it('makeHost hands the host role to a late joiner, never to a test player', () => {
+    const { room } = makeRoom();
+    const [a, b] = joinN(room, 2);
+    expect(room.hostId).toBe(a.player.id);
+    room.makeHost(b.player.id);
+    expect(room.hostId).toBe(b.player.id);
+    room.addTestPlayer('smart');
+    const bot = room.players.find((p) => p.testPlayer);
+    if (bot) room.makeHost(bot.id);
+    expect(room.hostId).toBe(b.player.id);
+    room.advance({ kind: 'player', id: b.player.id }, 'START');
+    expect(room.phase).toBe('GAME_SELECT');
+    expect(() => room.advance({ kind: 'player', id: a.player.id }, 'CHOOSE_HOCKEY')).toThrow(RoomError);
+  });
+});

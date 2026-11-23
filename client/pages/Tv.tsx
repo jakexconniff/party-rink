@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { makeSocket, useConnected, useRoomState, fmtClock } from '../net/socket';
+import { makeSocket, storage, useConnected, useRoomState, fmtClock } from '../net/socket';
+import { Join } from './Join';
 import { RinkCanvas, type FxState, type RosterInfo, type SnapBuffer } from '../components/RinkCanvas';
 import { HelpSheet } from '../components/Help';
 import { TIPS, TIP_ROTATE_MS } from '../../shared/tips';
@@ -14,6 +15,14 @@ export function Tv() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [adminOpen, setAdminOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Someone playing on this screen with keyboard + mouse (joins as host, menus in a side panel).
+  const [playHere, setPlayHereState] = useState(() => storage.get('partyrink.playHere') === '1');
+  const [panelOpen, setPanelOpen] = useState(true);
+  const setPlayHere = (on: boolean) => {
+    storage.set('partyrink.playHere', on ? '1' : '0');
+    setPlayHereState(on);
+    setPanelOpen(true);
+  };
   const buffer = useRef<SnapBuffer>({ items: [] });
   const roster = useRef<RosterInfo>({});
   const fx = useRef<FxState>({ callouts: [], quips: [], shakeUntil: 0 });
@@ -106,14 +115,15 @@ export function Tv() {
   useEffect(() => {
     if (!info?.isLocal) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'p' && e.key !== 'P' && e.key !== ' ') return;
+      // Space is SHOOT for the player on this screen, so only P pauses then.
+      if (e.key !== 'p' && e.key !== 'P' && (e.key !== ' ' || playHere)) return;
       if (!room || !['COUNTDOWN', 'PLAYING', 'GOAL_PAUSE', 'PAUSED'].includes(room.phase)) return;
       e.preventDefault();
       socket.emit('match:pause', { paused: room.phase !== 'PAUSED' });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [info?.isLocal, room, socket]);
+  }, [info?.isLocal, room, socket, playHere]);
 
   return (
     <div className="tv-root">
@@ -146,6 +156,24 @@ export function Tv() {
             {adminOpen ? 'Close admin' : 'Admin'}
           </button>
           {adminOpen ? <AdminPanel room={room} socket={socket} /> : null}
+          {!playHere ? (
+            <button className="play-here-btn" onClick={() => setPlayHere(true)}>
+              🎮 Play on this screen
+            </button>
+          ) : (
+            <div className={inMatch ? 'tv-player in-match' : `tv-player tv-player-panel ${panelOpen ? '' : 'collapsed'}`}>
+              {!inMatch ? (
+                <div className="tv-player-bar">
+                  <span>🎮 Playing on this screen</span>
+                  <button onClick={() => setPanelOpen((v) => !v)}>{panelOpen ? 'Hide' : 'Show'}</button>
+                  <button onClick={() => setPlayHere(false)}>Stop</button>
+                </div>
+              ) : null}
+              <div className="tv-player-body">
+                <Join embedded />
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>

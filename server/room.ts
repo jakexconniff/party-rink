@@ -249,6 +249,14 @@ export class Room {
     return { ok: true, player, token: newToken, reclaimed: false };
   }
 
+  /** Hand the host role to this (real) player. */
+  makeHost(id: string) {
+    const p = this.getPlayer(id);
+    if (!p || p.testPlayer || this.hostId === id) return;
+    this.hostId = id;
+    this.dirty = true;
+  }
+
   disconnect(id: string) {
     const p = this.getPlayer(id);
     if (!p || !p.connected) return;
