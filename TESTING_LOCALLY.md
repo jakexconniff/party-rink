@@ -58,7 +58,7 @@ On the TV page, open Admin. **Clock → 0:10** (dev mode only) or **End match no
 
 - **Reconnect:** reload the phone page mid-match. You get the same skater back.
 - **Server restarted:** phones say so and drop back to the lobby. The game lives in memory, so a restart always resets it.
-- **No phone?** Open `http://localhost:3000/join?player=1` in a narrow browser window. `?player=2` gives a second independent player in another tab. Use your browser's device toolbar to emulate a phone in landscape.
+- **No phone?** Open `http://localhost:3000/join?player=1` in a narrow browser window. `?player=2` gives a second independent player in another tab. Use your browser's device toolbar to emulate a phone in landscape, or just play with the keyboard: WASD/arrows skate, left click (or J) = PASS/POKE, right click (or K / Space) = SHOOT.
 - **Automated:** `node node_modules/vitest/vitest.mjs run` (unit tests) and `node node_modules/tsx/dist/cli.mjs scripts/smoke-eight.ts` (8 real socket clients through the whole flow).
 
 ## Troubleshooting with the log

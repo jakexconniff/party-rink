@@ -10,6 +10,8 @@ const STICK_RADIUS = 62;
 const SEND_MIN_MS = 33; // ≤30 Hz on change
 const HEARTBEAT_MS = 120;
 const CHARGE_MS = 1500;
+/** A computer with a mouse/trackpad (not a phone): show the keyboard hint instead of the thumb hint. */
+const FINE_POINTER = typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 /** Android Chrome can lock to landscape once in fullscreen; iOS can't — the rotate prompt covers it. */
 let lockTried = false;
@@ -97,6 +99,10 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
   const [shootDown, setShootDown] = useState(false);
   const shootStart = useRef(0);
   const [charge, setCharge] = useState(0);
+  // Keyboard + mouse (playing from a computer): held movement keys, and which keys/mouse buttons hold each action.
+  const keys = useRef(new Set<string>());
+  const kbPass = useRef(new Set<string>());
+  const kbShoot = useRef(new Set<string>());
 
   const sendNow = () => {
     pending.current = null;
@@ -134,6 +140,9 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
 
   const releaseAll = (cancel: boolean) => {
     stickId.current = passId.current = shootId.current = null;
+    keys.current.clear();
+    kbPass.current.clear();
+    kbShoot.current.clear();
     const wasShoot = input.current.shoot;
     input.current = { x: 0, y: 0, pass: false, shoot: false, cancel: cancel && wasShoot };
     setPassDown(false);
@@ -165,6 +174,103 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ---- keyboard + mouse: WASD/arrows skate, left click (or J) = PASS/POKE, right click (or K/Space) = SHOOT
+  useEffect(() => {
+    const MOVE: Record<string, [number, number]> = {
+      KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
+      KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0],
+    };
+    const applyKeys = () => {
+      if (stickId.current !== null) return; // a finger on the stick wins
+      let x = 0;
+      let y = 0;
+      for (const k of keys.current) {
+        x += MOVE[k][0];
+        y += MOVE[k][1];
+      }
+      x = Math.sign(x);
+      y = Math.sign(y);
+      const d = Math.hypot(x, y) || 1;
+      input.current.x = Math.round((x / d) * 100) / 100;
+      input.current.y = Math.round((y / d) * 100) / 100;
+      send(true);
+    };
+    // One action can be held by several sources (e.g. mouse + key); it's down while any of them is.
+    const press = (which: 'pass' | 'shoot', src: string, down: boolean) => {
+      const set = which === 'pass' ? kbPass.current : kbShoot.current;
+      const was = set.size > 0;
+      if (down) set.add(src);
+      else set.delete(src);
+      const now = set.size > 0;
+      if (now === was) return;
+      input.current[which] = now;
+      if (which === 'pass') setPassDown(now);
+      else {
+        if (now) shootStart.current = performance.now();
+        else input.current.cancel = false;
+        setShootDown(now);
+      }
+      send(true);
+    };
+    const ACTION: Record<string, 'pass' | 'shoot'> = { KeyJ: 'pass', KeyK: 'shoot', Space: 'shoot' };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (MOVE[e.code]) {
+        e.preventDefault();
+        if (!keys.current.has(e.code)) {
+          keys.current.add(e.code);
+          applyKeys();
+        }
+      } else if (ACTION[e.code]) {
+        e.preventDefault();
+        if (!e.repeat) press(ACTION[e.code], e.code, true);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (MOVE[e.code] && keys.current.delete(e.code)) applyKeys();
+      else if (ACTION[e.code]) press(ACTION[e.code], e.code, false);
+    };
+    // Mouse only (touch taps also fire mouse events, so ignore those right after a touch).
+    let lastTouch = 0;
+    const onTouch = () => {
+      lastTouch = performance.now();
+    };
+    const isUi = (t: EventTarget | null) => {
+      const el = t instanceof Element ? t : null;
+      if (!el) return false;
+      // real buttons outside the play area (help, pause, resume, close) keep working with a click
+      return !!el.closest('button, a, input, .help-overlay') && !el.closest('.ctl-body');
+    };
+    // Stop the on-screen buttons from also reacting to the mouse; mousedown/mouseup handle it.
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && !isUi(e.target)) e.stopPropagation();
+    };
+    const MOUSE: Record<number, 'pass' | 'shoot'> = { 0: 'pass', 2: 'shoot' };
+    const onMouseDown = (e: MouseEvent) => {
+      if (performance.now() - lastTouch < 1000 || isUi(e.target) || !MOUSE[e.button]) return;
+      e.preventDefault();
+      press(MOUSE[e.button], `mouse${e.button}`, true);
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (MOUSE[e.button]) press(MOUSE[e.button], `mouse${e.button}`, false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('touchstart', onTouch, { capture: true, passive: true });
+    window.addEventListener('pointerdown', onPointerDownCapture, true);
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('touchstart', onTouch, true);
+      window.removeEventListener('pointerdown', onPointerDownCapture, true);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket]);
 
   // charge meter animation (local, smooth; server is authoritative about the actual shot)
   useEffect(() => {
@@ -344,7 +450,11 @@ export function Controller({ socket, cs, team, name, number, look, connected, is
         >
           <div ref={baseEl} className="stick-base" style={{ display: 'none' }} />
           <div ref={knobEl} className="stick-knob" style={{ display: 'none' }} />
-          <div className="stick-hint">Left thumb: drag anywhere here to skate</div>
+          <div className="stick-hint">
+            {FINE_POINTER
+              ? 'Keyboard: WASD to skate · left click PASS/POKE · right click SHOOT'
+              : 'Left thumb: drag anywhere here to skate'}
+          </div>
         </div>
         <div className="btn-zone">
           <button

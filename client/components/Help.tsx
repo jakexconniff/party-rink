@@ -5,6 +5,7 @@ const BASICS: [string, string][] = [
   ['PASS', 'Top button when you have the puck. Aims at the teammate you’re facing'],
   ['SHOOT', 'Bottom button. Tap for a quick shot, or hold to charge and aim with the stick'],
   ['POKE', 'Top button without the puck. Tap right next to the carrier, facing them, to steal it'],
+  ['On a computer', 'WASD or arrows to skate, left click (or J) = PASS/POKE, right click (or K / Space) = SHOOT'],
 ];
 
 const SKILLS: [string, string][] = [
